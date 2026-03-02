@@ -1172,26 +1172,29 @@ function mostrarLogin() {
       <h2>Login Sistema Inventario</h2>
       <input type="email" id="email" placeholder="Correo" />
       <input type="password" id="password" placeholder="Contraseña" />
-      <button onclick="iniciarSesion()">Ingresar</button>
+      <button id="btnLogin">Ingresar</button>
       <p id="error" style="color:red;"></p>
     </div>
   `;
+
+  document.getElementById("btnLogin")
+    .addEventListener("click", iniciarSesion);
 }
 function iniciarSesion() {
   const email = document.getElementById("email").value;
   const password = document.getElementById("password").value;
 
   window.firebaseSignIn(window.firebaseAuth, email, password)
-    .then((userCredential) => {
-      console.log("Login exitoso:", userCredential.user.email);
+    .then(() => {
       location.reload();
     })
     .catch((error) => {
-      console.error("Error real:", error);
       document.getElementById("error").innerText = error.message;
     });
 }
 }
 }
+}
+
 
 
