@@ -12,7 +12,25 @@ const SistemaInventario = {
     colmenasHistorico: [],
     mermas: []
 };
+// Verificar sesión activa
+document.addEventListener("DOMContentLoaded", () => {
 
+  const esperarFirebase = setInterval(() => {
+    if (window.firebaseAuth) {
+      clearInterval(esperarFirebase);
+
+      window.firebaseAuth.onAuthStateChanged((user) => {
+        if (!user) {
+          mostrarLogin();
+        } else {
+          console.log("Usuario logueado:", user.email);
+        }
+      });
+
+    }
+  }, 100);
+
+});
 // Función para guardar el sistema en localStorage
 function guardarSistema() {
     localStorage.setItem('sistemaInventario', JSON.stringify(SistemaInventario));
@@ -1139,4 +1157,35 @@ function exportarColmenasDisponibles() {
     XLSX.writeFile(wb, nombreArchivo);
     log(`✅ Colmenas disponibles exportadas a ${nombreArchivo}`, 'success');
     alert(`Colmenas disponibles exportadas exitosamente a: ${nombreArchivo}`);
+}
+function mostrarLogin() {
+  document.body.innerHTML = `
+    <div style="
+      display:flex;
+      justify-content:center;
+      align-items:center;
+      height:100vh;
+      font-family:Arial;
+      flex-direction:column;
+      gap:10px;
+    ">
+      <h2>Login Sistema Inventario</h2>
+      <input type="email" id="email" placeholder="Correo" />
+      <input type="password" id="password" placeholder="Contraseña" />
+      <button onclick="iniciarSesion()">Ingresar</button>
+      <p id="error" style="color:red;"></p>
+    </div>
+  `;
+}
+function iniciarSesion() {
+  const email = document.getElementById("email").value;
+  const password = document.getElementById("password").value;
+
+  window.firebaseAuth.signInWithEmailAndPassword(email, password)
+    .then(() => {
+      location.reload();
+    })
+    .catch((error) => {
+      document.getElementById("error").innerText = "Credenciales incorrectas";
+    });
 }
