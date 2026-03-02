@@ -1205,10 +1205,6 @@ function iniciarSesion() {
       document.getElementById("error").innerText = error.message;
     });
 }
-}
-}
-}
-}
 function cerrarSesion() {
     if (!window.firebaseAuth) {
         console.error("Auth no está disponible");
@@ -1229,6 +1225,7 @@ function cerrarSesion() {
 }
 
 window.cerrarSesion = cerrarSesion;
+
 
 
 
