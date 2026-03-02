@@ -19,39 +19,43 @@ document.addEventListener("DOMContentLoaded", () => {
     if (window.firebaseAuth) {
       clearInterval(esperarFirebase);
 
-     window.firebaseOnAuth(window.firebaseAuth, async (user) => {
-    if (!user) {
-        mostrarLogin();
-    } else {
-        console.log("Usuario logueado:", user.email);
+      window.firebaseOnAuth(window.firebaseAuth, async (user) => {
+        if (!user) {
+          mostrarLogin();
+        } else {
+          console.log("Usuario logueado:", user.email);
 
-        // 🔥 PRUEBA FIRESTORE
-        try {
+          // 🔥 PRUEBA FIRESTORE
+          try {
             const db = window.firebaseDB;
 
             const docRef = await window.fbAddDoc(
-                window.fbCollection(db, "test"),
-                { 
-                    mensaje: "Firestore funcionando 🚀",
-                    usuario: user.email,
-                    fecha: new Date()
-                }
+              window.fbCollection(db, "test"),
+              { 
+                mensaje: "Firestore funcionando 🚀",
+                usuario: user.email,
+                fecha: new Date()
+              }
             );
 
             console.log("Documento creado:", docRef.id);
-        } catch (error) {
+          } catch (error) {
             console.error("Error Firestore:", error);
-        }
+          }
 
-        // 🔐 Logout
-        const btn = document.getElementById("btnLogout");
-        if (btn) {
+          // 🔐 Logout
+          const btn = document.getElementById("btnLogout");
+          if (btn) {
             btn.addEventListener("click", () => {
-                window.firebaseSignOut(window.firebaseAuth)
-                .then(() => {
-                    location.reload();
-          });
-    } 
+              window.firebaseSignOut(window.firebaseAuth)
+              .then(() => {
+                location.reload();
+              });
+            });
+          }
+        }
+      });
+    }
   }, 100);
 });
 // Función para guardar el sistema en localStorage
@@ -1226,4 +1230,3 @@ function cerrarSesion() {
 }
 
 window.cerrarSesion = cerrarSesion;
-
