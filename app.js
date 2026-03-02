@@ -1182,12 +1182,16 @@ function iniciarSesion() {
   const password = document.getElementById("password").value;
 
   window.firebaseSignIn(window.firebaseAuth, email, password)
-    .then(() => {
+    .then((userCredential) => {
+      console.log("Login exitoso:", userCredential.user.email);
       location.reload();
     })
-    .catch(() => {
-      document.getElementById("error").innerText = "Credenciales incorrectas";
+    .catch((error) => {
+      console.error("Error real:", error);
+      document.getElementById("error").innerText = error.message;
     });
 }
 }
+}
+
 
