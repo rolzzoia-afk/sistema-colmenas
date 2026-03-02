@@ -1210,19 +1210,25 @@ function iniciarSesion() {
 }
 }
 function cerrarSesion() {
-  if (!window.firebaseAuth || !window.firebaseSignOut) {
-    alert("Firebase no está listo");
-    return;
-  }
+    if (!window.firebaseAuth) {
+        console.error("Auth no está disponible");
+        return;
+    }
 
-  window.firebaseSignOut(window.firebaseAuth)
-    .then(() => {
-      location.reload();
-    })
-    .catch((error) => {
-      alert("Error al cerrar sesión: " + error.message);
+    import("https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js")
+    .then(({ signOut }) => {
+        signOut(window.firebaseAuth)
+            .then(() => {
+                alert("Sesión cerrada");
+                location.reload();
+            })
+            .catch((error) => {
+                console.error("Error al cerrar sesión:", error);
+            });
     });
 }
+
+window.cerrarSesion = cerrarSesion;
 
 
 
