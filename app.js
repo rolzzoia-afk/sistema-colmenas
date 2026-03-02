@@ -50,10 +50,9 @@ document.addEventListener("DOMContentLoaded", () => {
                 window.firebaseSignOut(window.firebaseAuth)
                 .then(() => {
                     location.reload();
-                });
-            });
-        }
-    }
+          });
+    } 
+  }, 100);
 });
 // Función para guardar el sistema en localStorage
 function guardarSistema() {
@@ -1227,3 +1226,4 @@ function cerrarSesion() {
 }
 
 window.cerrarSesion = cerrarSesion;
+
