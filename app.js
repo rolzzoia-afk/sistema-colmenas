@@ -19,28 +19,41 @@ document.addEventListener("DOMContentLoaded", () => {
     if (window.firebaseAuth) {
       clearInterval(esperarFirebase);
 
-      window.firebaseOnAuth(window.firebaseAuth, (user) => {
-        if (!user) {
-          mostrarLogin();
-        } else {
-          console.log("Usuario logueado:", user.email);
+     window.firebaseOnAuth(window.firebaseAuth, async (user) => {
+    if (!user) {
+        mostrarLogin();
+    } else {
+        console.log("Usuario logueado:", user.email);
 
-          const btn = document.getElementById("btnLogout");
-          if (btn) {
+        // 🔥 PRUEBA FIRESTORE
+        try {
+            const db = window.firebaseDB;
+
+            const docRef = await window.fbAddDoc(
+                window.fbCollection(db, "test"),
+                { 
+                    mensaje: "Firestore funcionando 🚀",
+                    usuario: user.email,
+                    fecha: new Date()
+                }
+            );
+
+            console.log("Documento creado:", docRef.id);
+        } catch (error) {
+            console.error("Error Firestore:", error);
+        }
+
+        // 🔐 Logout
+        const btn = document.getElementById("btnLogout");
+        if (btn) {
             btn.addEventListener("click", () => {
-              window.firebaseSignOut(window.firebaseAuth)
+                window.firebaseSignOut(window.firebaseAuth)
                 .then(() => {
-                  location.reload();
+                    location.reload();
                 });
             });
-          }
-
         }
-      });
-
     }
-  }, 100);
-
 });
 // Función para guardar el sistema en localStorage
 function guardarSistema() {
@@ -1214,22 +1227,3 @@ function cerrarSesion() {
 }
 
 window.cerrarSesion = cerrarSesion;
-async function pruebaFirestore() {
-    const db = window.firebaseDB;
-
-    const docRef = await window.fbAddDoc(
-        window.fbCollection(db, "test"),
-        { mensaje: "Firestore funcionando 🚀", fecha: new Date() }
-    );
-
-    console.log("Documento creado:", docRef.id);
-}
-
-pruebaFirestore();
-
-
-
-
-
-
-
