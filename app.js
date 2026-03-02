@@ -19,11 +19,22 @@ document.addEventListener("DOMContentLoaded", () => {
     if (window.firebaseAuth) {
       clearInterval(esperarFirebase);
 
-      window.firebaseAuth.onAuthStateChanged((user) => {
+      window.firebaseOnAuth(window.firebaseAuth, (user) => {
         if (!user) {
           mostrarLogin();
         } else {
           console.log("Usuario logueado:", user.email);
+
+          const btn = document.getElementById("btnLogout");
+          if (btn) {
+            btn.addEventListener("click", () => {
+              window.firebaseSignOut(window.firebaseAuth)
+                .then(() => {
+                  location.reload();
+                });
+            });
+          }
+
         }
       });
 
@@ -1198,6 +1209,7 @@ function iniciarSesion() {
 }
 }
 }
+
 
 
 
