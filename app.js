@@ -1192,8 +1192,6 @@ function mostrarLogin() {
     .addEventListener("click", iniciarSesion);
 }
 function iniciarSesion() {
-  alert("Botón funcionando");
-
   const email = document.getElementById("email").value;
   const password = document.getElementById("password").value;
 
@@ -1206,25 +1204,17 @@ function iniciarSesion() {
     });
 }
 function cerrarSesion() {
-    if (!window.firebaseAuth) {
-        console.error("Auth no está disponible");
-        return;
-    }
-
-    import("https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js")
-    .then(({ signOut }) => {
-        signOut(window.firebaseAuth)
-            .then(() => {
-                alert("Sesión cerrada");
-                location.reload();
-            })
-            .catch((error) => {
-                console.error("Error al cerrar sesión:", error);
-            });
+  window.firebaseSignOut(window.firebaseAuth)
+    .then(() => {
+      location.reload();
+    })
+    .catch((error) => {
+      console.error("Error al cerrar sesión:", error);
     });
 }
 
 window.cerrarSesion = cerrarSesion;
+
 
 
 
