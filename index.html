@@ -142,7 +142,25 @@
         <h2>📝 Logs</h2>
         <div class="log-container" id="logs"></div>
     </div>
+<!-- Firebase -->
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+  import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
 
+  const firebaseConfig = {
+  apiKey: "AIzaSyBUQVqyC3ti4hLbuBT8U4zINUWU3u07Dmw",
+  authDomain: "inventario-colmenas.firebaseapp.com",
+  projectId: "inventario-colmenas",
+  storageBucket: "inventario-colmenas.firebasestorage.app",
+  messagingSenderId: "412114089031",
+  appId: "1:412114089031:web:de2aedf856272598ae6d62"
+};
+
+  const app = initializeApp(firebaseConfig);
+  const auth = getAuth(app);
+
+  window.firebaseAuth = auth;
+</script>
     <script src="app.js"></script>
 </body>
 </html>
