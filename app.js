@@ -1181,6 +1181,8 @@ function mostrarLogin() {
     .addEventListener("click", iniciarSesion);
 }
 function iniciarSesion() {
+  alert("Botón funcionando");
+
   const email = document.getElementById("email").value;
   const password = document.getElementById("password").value;
 
@@ -1195,6 +1197,8 @@ function iniciarSesion() {
 }
 }
 }
+}
+
 
 
 
