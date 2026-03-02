@@ -148,32 +148,53 @@
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
   import { 
     getAuth, 
-    onAuthStateChanged,
     signInWithEmailAndPassword,
+    onAuthStateChanged,
     signOut
   } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
 
+  import { 
+    getFirestore,
+    collection,
+    addDoc,
+    getDocs,
+    deleteDoc,
+    doc
+  } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+
   const firebaseConfig = {
-    apiKey: "AIzaSyBUQVqyC3ti4hLbuBT8U4zINUWU3u07Dmw",
-    authDomain: "inventario-colmenas.firebaseapp.com",
-    projectId: "inventario-colmenas",
-    storageBucket: "inventario-colmenas.firebasestorage.app",
-    messagingSenderId: "412114089031",
-    appId: "1:412114089031:web:de2aedf856272598ae6d62"
+    apiKey: "TU_API_KEY",
+    authDomain: "TU_AUTH_DOMAIN",
+    projectId: "TU_PROJECT_ID",
+    storageBucket: "TU_STORAGE_BUCKET",
+    messagingSenderId: "TU_SENDER_ID",
+    appId: "TU_APP_ID"
   };
 
   const app = initializeApp(firebaseConfig);
-  const auth = getAuth(app);
 
-  // Exponer todo a window
+  // 🔐 Auth
+  const auth = getAuth(app);
   window.firebaseAuth = auth;
-  window.firebaseOnAuth = onAuthStateChanged;
   window.firebaseSignIn = signInWithEmailAndPassword;
+  window.firebaseOnAuth = onAuthStateChanged;
+
+  // 🔥 Firestore
+  const db = getFirestore(app);
+  window.firebaseDB = db;
+
+  window.fbCollection = collection;
+  window.fbAddDoc = addDoc;
+  window.fbGetDocs = getDocs;
+  window.fbDeleteDoc = deleteDoc;
+  window.fbDoc = doc;
+
   window.firebaseSignOut = signOut;
 </script>
     <script src="app.js"></script>
 </body>
 </html>
+
 
 
 
