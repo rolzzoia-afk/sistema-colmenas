@@ -1181,11 +1181,13 @@ function iniciarSesion() {
   const email = document.getElementById("email").value;
   const password = document.getElementById("password").value;
 
-  window.firebaseAuth.signInWithEmailAndPassword(email, password)
+  window.firebaseSignIn(window.firebaseAuth, email, password)
     .then(() => {
       location.reload();
     })
-    .catch((error) => {
+    .catch(() => {
       document.getElementById("error").innerText = "Credenciales incorrectas";
     });
 }
+}
+
