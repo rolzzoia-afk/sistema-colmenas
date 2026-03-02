@@ -12,6 +12,7 @@ const SistemaInventario = {
     colmenasHistorico: [],
     mermas: []
 };
+// prueba push
 // Verificar sesión activa
 document.addEventListener("DOMContentLoaded", () => {
 
