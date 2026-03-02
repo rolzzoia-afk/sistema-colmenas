@@ -1209,6 +1209,20 @@ function iniciarSesion() {
 }
 }
 }
+function cerrarSesion() {
+  if (!window.firebaseAuth || !window.firebaseSignOut) {
+    alert("Firebase no está listo");
+    return;
+  }
+
+  window.firebaseSignOut(window.firebaseAuth)
+    .then(() => {
+      location.reload();
+    })
+    .catch((error) => {
+      alert("Error al cerrar sesión: " + error.message);
+    });
+}
 
 
 
