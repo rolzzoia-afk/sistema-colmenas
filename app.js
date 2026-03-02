@@ -1214,6 +1214,18 @@ function cerrarSesion() {
 }
 
 window.cerrarSesion = cerrarSesion;
+async function pruebaFirestore() {
+    const db = window.firebaseDB;
+
+    const docRef = await window.fbAddDoc(
+        window.fbCollection(db, "test"),
+        { mensaje: "Firestore funcionando 🚀", fecha: new Date() }
+    );
+
+    console.log("Documento creado:", docRef.id);
+}
+
+pruebaFirestore();
 
 
 
