@@ -10,12 +10,14 @@ const SistemaInventario = {
     datosCrudosOrdenes: [],
     resultadosOptimizacion: [],
     colmenasHistorico: [],
-    mermas: []
+    mermas: [],
+    seriales: []  // Nuevo array para almacenar los seriales disponibles
 };
 
 // Variables globales para manejo de colmena desde Firebase
 let colmenaActual = null;        // Colmena descargada de Firebase al inicio de sesión
 let usandoColmenaManual = false; // true si el usuario subió un archivo manualmente
+let serialesDisponibles = [];    // Seriales disponibles cargados desde Firebase
 // prueba push
 // Verificar sesión activa
 document.addEventListener("DOMContentLoaded", () => {
@@ -35,6 +37,10 @@ document.addEventListener("DOMContentLoaded", () => {
           actualizarTablaOrdenes();
           actualizarTablaColmenas();
           actualizarTablaCatalogo();
+          
+          // Cargar seriales desde Firestore
+          await cargarSerialesDesdeFirestore();
+          actualizarTablaSeriales();
 
           // 🔐 Logout
           const btn = document.getElementById("btnLogout");
@@ -344,6 +350,353 @@ function cargarSistema() {
 
 // Cargar automáticamente al inicio
 cargarSistema();
+
+// ─── FUNCIONES DE SERIALES (Estructura de Inventario) ───────────────────────────
+
+// Función para cargar el archivo de estructura de inventario
+async function cargarEstructuraInventario(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+    
+    document.getElementById('loading-overlay').style.display = 'flex';
+    
+    try {
+        const datos = await leerExcelCompleto(file);
+        const filaEncabezado = detectarFilaEncabezado(datos);
+        const encabezados = datos[filaEncabezado];
+        
+        // Detectar columnas requeridas: FECHA, CODIGO, LOTE, PAQUETE, SERIAL
+        let colFecha = -1, colCodigo = -1, colLote = -1, colPaquete = -1, colSerial = -1;
+        
+        for (let i = 0; i < encabezados.length; i++) {
+            const enc = String(encabezados[i] || '').trim().toUpperCase();
+            if (enc.includes('FECHA')) colFecha = i;
+            if (enc.includes('CODIGO') || enc === 'COD') colCodigo = i;
+            if (enc.includes('LOTE')) colLote = i;
+            if (enc.includes('PAQUETE')) colPaquete = i;
+            if (enc.includes('SERIAL')) colSerial = i;
+        }
+        
+        // Verificar que se encontraron todas las columnas requeridas
+        if (colFecha === -1 || colCodigo === -1 || colLote === -1 || colPaquete === -1 || colSerial === -1) {
+            alert('No se encontraron todas las columnas requeridas: FECHA, CODIGO, LOTE, PAQUETE, SERIAL');
+            document.getElementById('loading-overlay').style.display = 'none';
+            return;
+        }
+        
+        // Procesar los datos
+        SistemaInventario.seriales = [];
+        
+        for (let i = filaEncabezado + 1; i < datos.length; i++) {
+            const fila = datos[i];
+            if (!fila) continue;
+            
+            const fecha = fila[colFecha];
+            const codigo = fila[colCodigo];
+            const lote = fila[colLote];
+            const paquete = fila[colPaquete];
+            const serial = fila[colSerial];
+            
+            // Verificar que los datos no estén vacíos
+            if (!fecha || !codigo || !lote || !paquete || !serial) continue;
+            
+            // Normalizar los datos
+            const fechaStr = typeof fecha === 'string' ? fecha.trim() : 
+                             fecha instanceof Date ? fecha.toISOString().split('T')[0] : 
+                             String(fecha).trim();
+            
+            const codigoStr = String(codigo).trim().toUpperCase();
+            const loteStr = String(lote).trim();
+            const paqueteStr = String(paquete).trim();
+            const serialStr = String(serial).trim();
+            
+            // Agregar a la lista de seriales
+            SistemaInventario.seriales.push({
+                fecha: fechaStr,
+                codigo: codigoStr,
+                lote: loteStr,
+                paquete: paqueteStr,
+                serial: serialStr,
+                estado: 'disponible'
+            });
+        }
+        
+        // Ordenar los seriales por FECHA (más antigua primero), LOTE, PAQUETE, SERIAL
+        SistemaInventario.seriales.sort((a, b) => {
+            // Primero por fecha (más antigua primero)
+            const fechaA = new Date(a.fecha);
+            const fechaB = new Date(b.fecha);
+            if (fechaA < fechaB) return -1;
+            if (fechaA > fechaB) return 1;
+            
+            // Luego por lote (numérico si es posible)
+            const loteANum = parseInt(a.lote);
+            const loteBNum = parseInt(b.lote);
+            if (!isNaN(loteANum) && !isNaN(loteBNum)) {
+                if (loteANum < loteBNum) return -1;
+                if (loteANum > loteBNum) return 1;
+            } else {
+                const cmpLote = a.lote.localeCompare(b.lote);
+                if (cmpLote !== 0) return cmpLote;
+            }
+            
+            // Luego por paquete (numérico si es posible)
+            const paqueteANum = parseInt(a.paquete);
+            const paqueteBNum = parseInt(b.paquete);
+            if (!isNaN(paqueteANum) && !isNaN(paqueteBNum)) {
+                if (paqueteANum < paqueteBNum) return -1;
+                if (paqueteANum > paqueteBNum) return 1;
+            } else {
+                const cmpPaquete = a.paquete.localeCompare(b.paquete);
+                if (cmpPaquete !== 0) return cmpPaquete;
+            }
+            
+            // Finalmente por serial (numérico si es posible)
+            const serialANum = parseInt(a.serial);
+            const serialBNum = parseInt(b.serial);
+            if (!isNaN(serialANum) && !isNaN(serialBNum)) {
+                return serialANum - serialBNum;
+            }
+            return a.serial.localeCompare(b.serial);
+        });
+        
+        // Actualizar la tabla de seriales
+        actualizarTablaSeriales();
+        
+        // Actualizar el estado en la UI
+        document.getElementById('estadoEstructura').textContent = `✓ ${SistemaInventario.seriales.length} seriales`;
+        document.getElementById('estadoEstructura').className = 'estado-archivo estado-ok';
+        
+        log(`🏷️ Estructura de inventario cargada: ${SistemaInventario.seriales.length} seriales`, 'success');
+        
+        // Guardar en Firebase
+        await guardarSerialesEnFirestore();
+        
+    } catch (e) {
+        alert('Error: ' + e.message);
+        console.error(e);
+    } finally {
+        document.getElementById('loading-overlay').style.display = 'none';
+    }
+}
+
+// Función para actualizar la tabla de seriales en la UI
+function actualizarTablaSeriales() {
+    const tbody = document.getElementById('tbodySeriales');
+    if (!tbody) return;
+    
+    if (SistemaInventario.seriales.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="6">Sin datos</td></tr>';
+        return;
+    }
+    
+    // Mostrar solo los primeros 100 seriales para no sobrecargar la UI
+    const serialesAMostrar = SistemaInventario.seriales.slice(0, 100);
+    
+    tbody.innerHTML = serialesAMostrar.map(s => {
+        let estadoBadge = '';
+        switch(s.estado) {
+            case 'disponible': 
+                estadoBadge = '<span style="background-color: #27ae60; color: white; padding: 2px 6px; border-radius: 3px; font-size: 10px;">DISPONIBLE</span>';
+                break;
+            case 'ocupado': 
+                estadoBadge = '<span style="background-color: #e74c3c; color: white; padding: 2px 6px; border-radius: 3px; font-size: 10px;">OCUPADO</span>';
+                break;
+            default: 
+                estadoBadge = s.estado || '';
+        }
+        
+        return `<tr>
+            <td>${s.codigo}</td>
+            <td>${s.fecha}</td>
+            <td>${s.lote}</td>
+            <td>${s.paquete}</td>
+            <td>${s.serial}</td>
+            <td>${estadoBadge}</td>
+        </tr>`;
+    }).join('');
+    
+    if (SistemaInventario.seriales.length > 100) {
+        tbody.innerHTML += `<tr><td colspan="6">... y ${SistemaInventario.seriales.length - 100} más</td></tr>`;
+    }
+}
+
+// Función para guardar los seriales en Firestore
+async function guardarSerialesEnFirestore() {
+    document.getElementById('loading-overlay').style.display = 'flex';
+    
+    try {
+        const user = window.firebaseAuth.currentUser;
+        if (!user) {
+            log("No hay usuario logueado para guardar seriales", "error");
+            return;
+        }
+
+        const db = window.firebaseDB;
+        
+        log("Guardando seriales en Firestore...", "info");
+        
+        // Guardar cada serial como un documento individual en la colección maestro_seriales
+        const batch = window.firebase.firestore().batch();
+        const coleccionRef = window.fbCollection(db, "maestro_seriales");
+        
+        // Primero, eliminar los documentos existentes
+        const docsExistentes = await window.fbGetDocs(coleccionRef);
+        docsExistentes.forEach(doc => {
+            batch.delete(doc.ref);
+        });
+        
+        // Luego, agregar los nuevos documentos
+        SistemaInventario.seriales.forEach(serial => {
+            const docRef = window.fbDoc(coleccionRef, `${serial.codigo}_${serial.lote}_${serial.paquete}_${serial.serial}`);
+            batch.set(docRef, {
+                ...serial,
+                usuario: user.email,
+                fechaActualizacion: new Date().toISOString()
+            });
+        });
+        
+        await batch.commit();
+        
+        console.log(`✅ ${SistemaInventario.seriales.length} seriales guardados en Firestore`);
+        log(`✅ ${SistemaInventario.seriales.length} seriales guardados en Firestore`, "success");
+        
+    } catch (error) {
+        console.error("Error guardando seriales en Firestore:", error);
+        log("❌ Error guardando seriales en Firestore: " + error.message, "error");
+    } finally {
+        document.getElementById('loading-overlay').style.display = 'none';
+    }
+}
+
+// Función para cargar los seriales desde Firestore
+async function cargarSerialesDesdeFirestore() {
+    try {
+        const user = window.firebaseAuth.currentUser;
+        if (!user) return;
+
+        const db = window.firebaseDB;
+        const coleccionRef = window.fbCollection(db, "maestro_seriales");
+        
+        try {
+            const querySnapshot = await window.fbGetDocs(coleccionRef);
+            
+            if (!querySnapshot.empty) {
+                SistemaInventario.seriales = [];
+                
+                querySnapshot.forEach(doc => {
+                    const data = doc.data();
+                    SistemaInventario.seriales.push({
+                        fecha: data.fecha,
+                        codigo: data.codigo,
+                        lote: data.lote,
+                        paquete: data.paquete,
+                        serial: data.serial,
+                        estado: data.estado || 'disponible'
+                    });
+                });
+                
+                // Ordenar los seriales
+                SistemaInventario.seriales.sort((a, b) => {
+                    // Por fecha (más antigua primero)
+                    const fechaA = new Date(a.fecha);
+                    const fechaB = new Date(b.fecha);
+                    if (fechaA < fechaB) return -1;
+                    if (fechaA > fechaB) return 1;
+                    
+                    // Por lote
+                    const loteANum = parseInt(a.lote);
+                    const loteBNum = parseInt(b.lote);
+                    if (!isNaN(loteANum) && !isNaN(loteBNum)) {
+                        if (loteANum < loteBNum) return -1;
+                        if (loteANum > loteBNum) return 1;
+                    } else {
+                        const cmpLote = a.lote.localeCompare(b.lote);
+                        if (cmpLote !== 0) return cmpLote;
+                    }
+                    
+                    // Por paquete
+                    const paqueteANum = parseInt(a.paquete);
+                    const paqueteBNum = parseInt(b.paquete);
+                    if (!isNaN(paqueteANum) && !isNaN(paqueteBNum)) {
+                        if (paqueteANum < paqueteBNum) return -1;
+                        if (paqueteANum > paqueteBNum) return 1;
+                    } else {
+                        const cmpPaquete = a.paquete.localeCompare(b.paquete);
+                        if (cmpPaquete !== 0) return cmpPaquete;
+                    }
+                    
+                    // Por serial
+                    const serialANum = parseInt(a.serial);
+                    const serialBNum = parseInt(b.serial);
+                    if (!isNaN(serialANum) && !isNaN(serialBNum)) {
+                        return serialANum - serialBNum;
+                    }
+                    return a.serial.localeCompare(b.serial);
+                });
+                
+                console.log(`✅ ${SistemaInventario.seriales.length} seriales cargados desde Firestore`);
+                
+                // Actualizar la tabla y el estado
+                actualizarTablaSeriales();
+                const estadoEl = document.getElementById('estadoEstructura');
+                if (estadoEl) {
+                    estadoEl.textContent = `✓ ${SistemaInventario.seriales.length} seriales (sincronizados)`;
+                    estadoEl.className = 'estado-archivo estado-ok';
+                }
+            } else {
+                console.log("No hay seriales guardados en Firestore");
+            }
+        } catch (error) {
+            console.error("Error cargando seriales desde Firestore:", error);
+        }
+    } catch (error) {
+        console.error("Error general cargando seriales:", error);
+    }
+}
+
+// Función para buscar un serial disponible para un código específico
+function buscarSerialDisponible(codigo) {
+    // Normalizar el código
+    const codigoNormalizado = normalizarCodigo(codigo);
+    
+    // Filtrar seriales disponibles para este código
+    const serialesDisponibles = SistemaInventario.seriales.filter(s => 
+        normalizarCodigo(s.codigo) === codigoNormalizado && s.estado === 'disponible'
+    );
+    
+    // Si no hay seriales disponibles, retornar null
+    if (serialesDisponibles.length === 0) return null;
+    
+    // Los seriales ya están ordenados por FECHA, LOTE, PAQUETE, SERIAL
+    // Retornar el primero (FIFO)
+    return serialesDisponibles[0];
+}
+
+// Función para marcar un serial como ocupado
+function marcarSerialComoOcupado(serial, ordenId) {
+    // Buscar el serial en la lista
+    const idx = SistemaInventario.seriales.findIndex(s => 
+        s.codigo === serial.codigo && 
+        s.lote === serial.lote && 
+        s.paquete === serial.paquete && 
+        s.serial === serial.serial
+    );
+    
+    if (idx !== -1) {
+        // Actualizar el estado
+        SistemaInventario.seriales[idx].estado = 'ocupado';
+        SistemaInventario.seriales[idx].ordenId = ordenId;
+        SistemaInventario.seriales[idx].fechaUso = new Date().toISOString();
+        
+        // Actualizar la tabla
+        actualizarTablaSeriales();
+        
+        return true;
+    }
+    
+    return false;
+}
 
 const COLUMNAS_ESPECIFICAS = [
     { key: 'con_tira', titulo: 'CON TIRA', buscar: ['con tira'] },
@@ -1415,16 +1768,63 @@ function ejecutarOptimizacion() {
                 }
             }
             if (!resultado) {
+                // Buscar un serial disponible para este código
+                const serialDisponible = buscarSerialDisponible(codOrden);
+                
                 const sobranteNuevo = MM_TUBO_ORIGINAL - orden.medida_mm - MM_KERF;
-                resultado = { orden: orden.id, medida_cm: orden.medida_cm, fuente: 'tubo_nuevo', codigo_original: codOrden, sobrante_cm: sobranteNuevo / 10 };
+                
+                // Crear el resultado con información del serial si está disponible
+                if (serialDisponible) {
+                    resultado = { 
+                        orden: orden.id, 
+                        medida_cm: orden.medida_cm, 
+                        fuente: 'tubo_nuevo', 
+                        codigo_original: codOrden, 
+                        sobrante_cm: sobranteNuevo / 10,
+                        serial: serialDisponible
+                    };
+                    
+                    // Marcar el serial como ocupado en la lista local
+                    marcarSerialComoOcupado(serialDisponible, orden.id);
+                    
+                    log(`🏷️ Serial asignado: ${serialDisponible.codigo} - Lote: ${serialDisponible.lote} - Paquete: ${serialDisponible.paquete} - Serial: ${serialDisponible.serial}`, 'info');
+                } else {
+                    resultado = { 
+                        orden: orden.id, 
+                        medida_cm: orden.medida_cm, 
+                        fuente: 'tubo_nuevo', 
+                        codigo_original: codOrden, 
+                        sobrante_cm: sobranteNuevo / 10
+                    };
+                    
+                    log(`⚠️ No se encontró serial disponible para el código ${codOrden}`, 'warn');
+                }
+                
                 const posicionesOcupadas = new Set(SistemaInventario.colmenasHistorico.map(c => c.n_colmena));
                 let posicionNueva = null;
                 for (let i = 1; i <= colmenasAUsar.length + 100; i++) {
                     const pos = 'A' + i;
                     if (!posicionesOcupadas.has(pos)) { posicionNueva = pos; break; }
                 }
+                
                 const codigoTuboNuevo = codOrden || 'TUBO-NUEVO';
-                SistemaInventario.colmenasHistorico.push({ n_colmena: posicionNueva, medida_cm: MM_TUBO_ORIGINAL / 10, medida_mm: MM_TUBO_ORIGINAL, cod: codigoTuboNuevo, codigo_original: codOrden, estado: 'usada', origen: 'Orden ' + orden.id + ' (Tubo nuevo)', posicionOriginal: posicionNueva });
+                
+                // Añadir información del serial al histórico si está disponible
+                const infoSerial = serialDisponible ? 
+                    ` (Serial: ${serialDisponible.lote}-${serialDisponible.paquete}-${serialDisponible.serial})` : '';
+                
+                SistemaInventario.colmenasHistorico.push({ 
+                    n_colmena: posicionNueva, 
+                    medida_cm: MM_TUBO_ORIGINAL / 10, 
+                    medida_mm: MM_TUBO_ORIGINAL, 
+                    cod: codigoTuboNuevo, 
+                    codigo_original: codOrden, 
+                    estado: 'usada', 
+                    origen: `Orden ${orden.id} (Tubo nuevo)${infoSerial}`, 
+                    posicionOriginal: posicionNueva,
+                    serial: serialDisponible
+                });
+                
                 const clasificacion = evaluarSobrante(sobranteNuevo);
                 if (clasificacion.estado !== 'prohibido' && clasificacion.estado !== 'merma') {
                     const colmenaExistente = buscarColmenaDisponibleConCodigo(codigoTuboNuevo);
@@ -1432,7 +1832,16 @@ function ejecutarOptimizacion() {
                         log(`📦 Sobrante agregado como nueva fila para colmena ${colmenaExistente.n_colmena} (código ${codigoTuboNuevo}). Medida sobrante: ${sobranteNuevo / 10}cm`, 'info');
                         const idxHistoricoExistente = SistemaInventario.colmenasHistorico.findIndex(c => c.n_colmena === colmenaExistente.n_colmena);
                         if (idxHistoricoExistente !== -1) {
-                            SistemaInventario.colmenasHistorico.splice(idxHistoricoExistente + 1, 0, { n_colmena: colmenaExistente.n_colmena, medida_cm: sobranteNuevo / 10, medida_mm: sobranteNuevo, cod: codigoTuboNuevo, codigo_original: codigoTuboNuevo, estado: 'disponible', origen: 'Sobrante tubo nuevo orden ' + orden.id, posicionOriginal: colmenaExistente.n_colmena });
+                            SistemaInventario.colmenasHistorico.splice(idxHistoricoExistente + 1, 0, { 
+                                n_colmena: colmenaExistente.n_colmena, 
+                                medida_cm: sobranteNuevo / 10, 
+                                medida_mm: sobranteNuevo, 
+                                cod: codigoTuboNuevo, 
+                                codigo_original: codigoTuboNuevo, 
+                                estado: 'disponible', 
+                                origen: `Sobrante tubo nuevo orden ${orden.id}${infoSerial}`, 
+                                posicionOriginal: colmenaExistente.n_colmena
+                            });
                         }
                         SistemaInventario.colmenasDisponibles.push({
                             n_colmena: colmenaExistente.n_colmena,
@@ -1441,7 +1850,16 @@ function ejecutarOptimizacion() {
                             cod: codigoTuboNuevo
                         });
                     } else {
-                        SistemaInventario.colmenasHistorico.push({ n_colmena: posicionNueva, medida_cm: sobranteNuevo / 10, medida_mm: sobranteNuevo, cod: codigoTuboNuevo, codigo_original: codigoTuboNuevo, estado: 'disponible', origen: 'Sobrante tubo nuevo orden ' + orden.id, posicionOriginal: posicionNueva });
+                        SistemaInventario.colmenasHistorico.push({ 
+                            n_colmena: posicionNueva, 
+                            medida_cm: sobranteNuevo / 10, 
+                            medida_mm: sobranteNuevo, 
+                            cod: codigoTuboNuevo, 
+                            codigo_original: codigoTuboNuevo, 
+                            estado: 'disponible', 
+                            origen: `Sobrante tubo nuevo orden ${orden.id}${infoSerial}`, 
+                            posicionOriginal: posicionNueva
+                        });
                         SistemaInventario.colmenasDisponibles.push({
                             n_colmena: posicionNueva,
                             medida_mm: sobranteNuevo,

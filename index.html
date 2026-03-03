@@ -73,6 +73,12 @@
             <input type="file" id="fileCatalogo" accept=".xlsx,.xlsm" class="file-input" onchange="cargarCatalogo(event)">
             <span id="estadoCatalogo" class="estado-archivo estado-pendiente">Sin cargar</span>
         </div>
+        
+        <div class="archivo-item">
+            <label><strong>Archivo de Estructura de Inventario:</strong></label>
+            <input type="file" id="fileEstructura" accept=".xlsx,.xlsm" class="file-input" onchange="cargarEstructuraInventario(event)">
+            <span id="estadoEstructura" class="estado-archivo estado-pendiente">Sin cargar</span>
+        </div>
 
         <button class="btn" onclick="ejecutarOptimizacion()" id="btnEjecutar" disabled>▶ Ejecutar</button>
         <button class="btn btn-exportar" onclick="exportarResultados()" id="btnExportar" disabled>📊 Exportar a Excel</button>
@@ -96,6 +102,25 @@
             <h3>📋 Catálogo de Reemplazos</h3>
             <div class="tabla-scroll">
                 <table id="tablaReemplazos"><thead><tr><th>Código</th><th>Reemplazo</th></tr></thead><tbody id="tbodyReemplazos"><tr><td>Sin datos</td></tr></tbody></table>
+            </div>
+            
+            <h3>🏷️ Seriales Disponibles</h3>
+            <div class="tabla-scroll">
+                <table id="tablaSeriales">
+                    <thead>
+                        <tr>
+                            <th>Código</th>
+                            <th>Fecha</th>
+                            <th>Lote</th>
+                            <th>Paquete</th>
+                            <th>Serial</th>
+                            <th>Estado</th>
+                        </tr>
+                    </thead>
+                    <tbody id="tbodySeriales">
+                        <tr><td colspan="6">Sin datos</td></tr>
+                    </tbody>
+                </table>
             </div>
         </div>
 
