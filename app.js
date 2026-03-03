@@ -12,6 +12,7 @@ const SistemaInventario = {
     colmenasHistorico: [],
     mermas: []
 };
+// prueba push
 // Verificar sesión activa
 document.addEventListener("DOMContentLoaded", () => {
 
@@ -25,23 +26,11 @@ document.addEventListener("DOMContentLoaded", () => {
         } else {
           console.log("Usuario logueado:", user.email);
 
-          // 🔥 PRUEBA FIRESTORE
-          try {
-            const db = window.firebaseDB;
-
-            const docRef = await window.fbAddDoc(
-              window.fbCollection(db, "test"),
-              { 
-                mensaje: "Firestore funcionando 🚀",
-                usuario: user.email,
-                fecha: new Date()
-              }
-            );
-
-            console.log("Documento creado:", docRef.id);
-          } catch (error) {
-            console.error("Error Firestore:", error);
-          }
+          // Cargar datos desde Firestore
+          await cargarDesdeFirestore();
+          actualizarTablaOrdenes();
+          actualizarTablaColmenas();
+          actualizarTablaCatalogo();
 
           // 🔐 Logout
           const btn = document.getElementById("btnLogout");
@@ -61,6 +50,48 @@ document.addEventListener("DOMContentLoaded", () => {
 // Función para guardar el sistema en localStorage
 function guardarSistema() {
     localStorage.setItem('sistemaInventario', JSON.stringify(SistemaInventario));
+}
+
+// Función para guardar en Firestore
+async function guardarEnFirestore() {
+    const user = window.firebaseAuth.currentUser;
+    if (!user) return;
+
+    const db = window.firebaseDB;
+
+    try {
+        await window.fbSetDoc(
+            window.fbDoc(db, "usuarios", user.email, "inventario", "datos"),
+            SistemaInventario
+        );
+        console.log("Inventario guardado en Firestore");
+    } catch (error) {
+        console.error("Error guardando en Firestore:", error);
+    }
+}
+
+// Función para cargar desde Firestore
+async function cargarDesdeFirestore() {
+    const user = window.firebaseAuth.currentUser;
+    if (!user) return;
+
+    const db = window.firebaseDB;
+
+    try {
+        const docSnap = await window.fbGetDoc(
+            window.fbDoc(db, "usuarios", user.email, "inventario", "datos")
+        );
+
+        if (docSnap.exists()) {
+            const datos = docSnap.data();
+            Object.assign(SistemaInventario, datos);
+            console.log("Inventario cargado desde Firestore");
+        } else {
+            console.log("No hay inventario guardado aún.");
+        }
+    } catch (error) {
+        console.error("Error cargando desde Firestore:", error);
+    }
 }
 
 // Función para cargar el sistema desde localStorage
@@ -301,6 +332,7 @@ async function cargarOrdenes(event) {
         verificarListo();
         log(`📋 Órdenes cargadas: ${SistemaInventario.ordenes.length}`, 'success');
         guardarSistema();
+        guardarEnFirestore();
     } catch (e) { alert('Error: ' + e.message); console.error(e); }
 }
 
@@ -1230,4 +1262,3 @@ function cerrarSesion() {
 }
 
 window.cerrarSesion = cerrarSesion;
-
