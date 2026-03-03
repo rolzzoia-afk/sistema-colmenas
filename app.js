@@ -18,7 +18,21 @@ const SistemaInventario = {
 let colmenaActual = null;        // Colmena descargada de Firebase al inicio de sesión
 let usandoColmenaManual = false; // true si el usuario subió un archivo manualmente
 let serialesDisponibles = [];    // Seriales disponibles cargados desde Firebase
-// prueba push
+
+function formatearFecha(fecha) {
+    if (!fecha || fecha === '-' || fecha === 'undefined' || fecha === null) return '-';
+    if (typeof fecha === 'number' && fecha > 40000) {
+        try {
+            const dExcel = new Date((fecha - 25569) * 86400 * 1000);
+            return `${String(dExcel.getDate()).padStart(2,'0')}/${String(dExcel.getMonth()+1).padStart(2,'0')}/${dExcel.getFullYear()}`;
+        } catch(e) { return '-'; }
+    }
+    try {
+        const d = new Date(fecha);
+        if (isNaN(d.getTime())) return (typeof fecha === 'string' && fecha.includes('/')) ? fecha : '-';
+        return `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}/${d.getFullYear()}`;
+    } catch(e) { return '-'; }
+}
 // Verificar sesión activa
 document.addEventListener("DOMContentLoaded", () => {
 
@@ -57,21 +71,7 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }, 100);
 });
-function formatearFecha(fecha) {
-    if (!fecha || fecha === '-' || fecha === 'undefined') return '-';
-    
-    // Si la fecha viene como número de Excel (ej: 46083)
-    if (typeof fecha === 'number' && fecha > 40000) {
-        const dExcel = new Date((fecha - 25569) * 86400 * 1000);
-        return `${String(dExcel.getDate()).padStart(2,'0')}/${String(dExcel.getMonth()+1).padStart(2,'0')}/${dExcel.getFullYear()}`;
-    }
 
-    try {
-        const d = new Date(fecha);
-        if (isNaN(d.getTime())) return fecha;
-        return `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}/${d.getFullYear()}`;
-    } catch(e) { return '-'; }
-}
 // Función para guardar el sistema en localStorage
 function guardarSistema() {
     localStorage.setItem('sistemaInventario', JSON.stringify(SistemaInventario));
@@ -561,7 +561,7 @@ async function guardarSerialesEnFirestore() {
 const batch = window.firebaseWriteBatch(window.firebaseDb); // <--- USA ESTA VERSIÓN
         
         // Ruta: usuarios/{email}/maestro_seriales
-        const coleccionRef = window.fbCollection(db, "usuarios", user.email, "maestro_seriales");
+        const coleccionRef = window.firebaseCollection(db, "usuarios", user.email, "maestro_seriales");
         
         // Primero, eliminar los documentos existentes
         const docsExistentes = await window.fbGetDocs(coleccionRef);
