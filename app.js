@@ -508,7 +508,7 @@ function actualizarTablaSeriales() {
         
         return `<tr>
             <td>${s.codigo}</td>
-            <td>${s.fecha}</td>
+            <td>${formatearFecha(s.fecha)}</td>
             <td>${s.lote}</td>
             <td>${s.paquete}</td>
             <td>${s.serial}</td>
@@ -521,7 +521,7 @@ function actualizarTablaSeriales() {
     }
 }
 
-// Función para guardar los seriales en Firestore
+// Función para guardar los seriales en Firestore usando writeBatch
 async function guardarSerialesEnFirestore() {
     document.getElementById('loading-overlay').style.display = 'flex';
     
@@ -529,56 +529,62 @@ async function guardarSerialesEnFirestore() {
         const user = window.firebaseAuth.currentUser;
         if (!user) {
             log("No hay usuario logueado para guardar seriales", "error");
+            document.getElementById('loading-overlay').style.display = 'none';
             return;
         }
 
+        // Usar la instancia db global
         const db = window.firebaseDB;
+        
+        if (!db) {
+            throw new Error("Firestore no está inicializado");
+        }
         
         log("Guardando seriales en Firestore...", "info");
         
-        // Crear la ruta correcta para guardar los seriales
+        // Crear el batch usando la instancia db
+        const batch = writeBatch(db);
+        
+        // Ruta: usuarios/{email}/maestro_seriales
         const coleccionRef = window.fbCollection(db, "usuarios", user.email, "maestro_seriales");
         
         // Primero, eliminar los documentos existentes
-        try {
-            const docsExistentes = await window.fbGetDocs(coleccionRef);
-            // Eliminar documentos uno por uno ya que no tenemos batch
-            const promesasEliminacion = [];
-            docsExistentes.forEach(doc => {
-                promesasEliminacion.push(window.fbDeleteDoc(doc.ref));
-            });
-            await Promise.all(promesasEliminacion);
-        } catch (error) {
-            console.log("No hay documentos previos o error al eliminar:", error);
-            // Continuar con la creación de nuevos documentos
-        }
-        
-        // Luego, agregar los nuevos documentos uno por uno
-        const promesasCreacion = [];
-        SistemaInventario.seriales.forEach(serial => {
-            const docId = `${serial.codigo}_${serial.lote}_${serial.paquete}_${serial.serial}`;
-            const docRef = window.fbDoc(db, "usuarios", user.email, "maestro_seriales", docId);
-            promesasCreacion.push(
-                window.fbSetDoc(docRef, {
-                    ...serial,
-                    usuario: user.email,
-                    fechaActualizacion: new Date().toISOString()
-                })
-            );
+        const docsExistentes = await window.fbGetDocs(coleccionRef);
+        docsExistentes.forEach(doc => {
+            batch.delete(doc.ref);
         });
         
-        await Promise.all(promesasCreacion);
+        // Luego, agregar los nuevos documentos
+        SistemaInventario.seriales.forEach(serial => {
+            const docId = `${serial.codigo}_${serial.lote}_${serial.paquete}_${serial.serial}`;
+            const docRef = window.fbDoc(coleccionRef, docId);
+            batch.set(docRef, {
+                ...serial,
+                usuario: user.email,
+                fechaActualizacion: new Date().toISOString()
+            });
+        });
+        
+        // Ejecutar el batch
+        await batch.commit();
         
         console.log(`✅ ${SistemaInventario.seriales.length} seriales guardados en Firestore`);
         log(`✅ ${SistemaInventario.seriales.length} seriales guardados en Firestore`, "success");
         
     } catch (error) {
         console.error("Error guardando seriales en Firestore:", error);
-        log("❌ Error guardando seriales en Firestore: " + error.message, "error");
+        
+        // Verificar errores de permisos
+        if (error.code === 'permission-denied' || error.message.includes('permission')) {
+            log("❌ Error de permisos: No tienes acceso a Firestore. Verifica las reglas de Firebase.", "error");
+        } else {
+            log("❌ Error guardando seriales en Firestore: " + error.message, "error");
+        }
     } finally {
         document.getElementById('loading-overlay').style.display = 'none';
     }
 }
+
 
 // Función para cargar los seriales desde Firestore
 async function cargarSerialesDesdeFirestore() {
@@ -797,6 +803,55 @@ function leerExcelCompleto(file) {
         reader.onerror = reject;
         reader.readAsArrayBuffer(file);
     });
+}
+
+// Función para formatear fecha ISO a formato DD/MM/YYYY
+// Maneja tanto strings ISO como objetos Date de JavaScript
+function formatearFecha(fechaISO) {
+    // Si la fecha viene vacía, null, undefined o es una cadena vacía, retornar '-'
+    if (!fechaISO || fechaISO === '' || fechaISO === null || fechaISO === undefined) {
+        return '-';
+    }
+    
+    let fecha;
+    
+    // Determinar si es un string o un objeto Date
+    if (typeof fechaISO === 'string') {
+        // Si ya viene en formato DD/MM/YYYY, retornarlo sin cambios
+        const patronDDMMYYYY = /^\d{2}\/\d{2}\/\d{4}$/;
+        if (patronDDMMYYYY.test(fechaISO)) {
+            return fechaISO;
+        }
+        
+        // Intentar parsear como fecha ISO (YYYY-MM-DD)
+        try {
+            fecha = new Date(fechaISO);
+        } catch (e) {
+            // Si no se puede parsear, retornar la cadena original
+            return fechaISO;
+        }
+    } else if (fechaISO instanceof Date) {
+        fecha = fechaISO;
+    } else {
+        // Si es otro tipo, intentar convertir a string y luego a fecha
+        try {
+            fecha = new Date(String(fechaISO));
+        } catch (e) {
+            return String(fechaISO);
+        }
+    }
+    
+    // Verificar si la fecha es válida
+    if (isNaN(fecha.getTime())) {
+        return '-';
+    }
+    
+    // Extraer día, mes y año
+    const dia = String(fecha.getDate()).padStart(2, '0');
+    const mes = String(fecha.getMonth() + 1).padStart(2, '0');
+    const año = fecha.getFullYear();
+    
+    return `${dia}/${mes}/${año}`;
 }
 
 function formatearNumero(valor) {
@@ -1932,7 +1987,7 @@ function exportarResultados() {
     }
 
     const datosExcel = [];
-    datosExcel.push(['OT', 'Ubicación', 'Acción', 'Colmena', 'Código', 'Medida (cm)']);
+    datosExcel.push(['OT', 'Ubicación', 'Acción', 'Colmena', 'Código', 'Medida (cm)', 'Fecha Serial']);
 
     SistemaInventario.resultadosOptimizacion.forEach(item => {
         const orden = item.orden;
@@ -1944,8 +1999,11 @@ function exportarResultados() {
         const codigoUsado = resultado.codigo || resultado.codigo_original || '';
         const textoColmena = resultado.colmena && resultado.colmena !== '' ? resultado.colmena : 'TUBO NUEVO';
         const medida = resultado.medida_cm;
+        
+        // Obtener la fecha del serial si existe
+        const fechaSerial = resultado.serial ? formatearFecha(resultado.serial.fecha) : '-';
 
-        datosExcel.push([ot, ubic, 'CORTAR', textoColmena, codigoUsado, medida]);
+        datosExcel.push([ot, ubic, 'CORTAR', textoColmena, codigoUsado, medida, fechaSerial]);
 
         if (resultado.sobrante_cm && resultado.sobrante_cm > 0) {
             const sobranteEncontrado = SistemaInventario.colmenasHistorico.find(c =>
@@ -1961,7 +2019,8 @@ function exportarResultados() {
                     'GUARDAR SOBRANTE',
                     sobranteEncontrado.n_colmena,
                     sobranteEncontrado.cod,
-                    sobranteEncontrado.medida_cm
+                    sobranteEncontrado.medida_cm,
+                    '-'
                 ]);
             }
         }
@@ -1976,6 +2035,7 @@ function exportarResultados() {
         { wch: 20 },
         { wch: 12 },
         { wch: 12 },
+        { wch: 15 },
         { wch: 15 }
     ];
 
