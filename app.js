@@ -101,8 +101,8 @@ async function guardarEnFirestore() {
             fechaActualizacion: new Date().toISOString()
         };
         
-        await window.fbSetDoc(
-            window.fbDoc(db, "usuarios", user.email, "inventario", "datos"),
+        await window.firebaseSetDoc(
+            window.firebaseDoc(db, "usuarios", user.email, "inventario", "datos"),
             datosAhorro
         );
         
@@ -132,11 +132,11 @@ async function cargarDesdeFirestore() {
         const db = window.firebaseDB;
 
         // Crear la referencia al documento
-        const docRef = window.fbDoc(db, "usuarios", user.email, "inventario", "datos");
+        const docRef = window.firebaseDoc(db, "usuarios", user.email, "inventario", "datos");
         
         try {
-            // Obtener el documento usando fbGetDoc (singular)
-            const docSnap = await window.fbGetDoc(docRef);
+            // Obtener el documento usando firebaseGetDoc (singular)
+            const docSnap = await window.firebaseGetDoc(docRef);
             
             if (docSnap && docSnap.exists()) {
                 const docData = docSnap.data();
@@ -159,8 +159,8 @@ async function cargarDesdeFirestore() {
             
             // Intento alternativo usando la sintaxis antigua si la nueva falla
             try {
-                const docSnap = await window.fbGetDoc(
-                    window.fbDoc(db, "usuarios", user.email, "inventario", "datos")
+                const docSnap = await window.firebaseGetDoc(
+                    window.firebaseDoc(db, "usuarios", user.email, "inventario", "datos")
                 );
                 
                 if (docSnap && docSnap.exists()) {
@@ -222,8 +222,8 @@ async function guardarResultadoOptimizacion(resultados) {
         };
 
         // Guardar en la colección 'historial_optimizaciones' usando una referencia de documento
-        const docRef = window.fbDoc(db, "historial_optimizaciones", timestamp + "_" + user.email);
-        await window.fbSetDoc(docRef, datosConTimestamp);
+        const docRef = window.firebaseDoc(db, "historial_optimizaciones", timestamp + "_" + user.email);
+        await window.firebaseSetDoc(docRef, datosConTimestamp);
 
         console.log("✅ Resultados de optimización guardados en historial:", timestamp);
         log("✅ Resultados de optimización guardados correctamente", "success");
@@ -262,8 +262,8 @@ async function cargarColmenaFinalDesdeFirestore() {
         if (!user) return;
 
         const db = window.firebaseDB;
-        const docRef = window.fbDoc(db, "usuarios", user.email, "colmena_final", "datos");
-        const docSnap = await window.fbGetDoc(docRef);
+        const docRef = window.firebaseDoc(db, "usuarios", user.email, "colmena_final", "datos");
+        const docSnap = await window.firebaseGetDoc(docRef);
 
         if (docSnap && docSnap.exists()) {
             const docData = docSnap.data();
@@ -316,8 +316,8 @@ async function guardarColmenaFinalEnFirestore() {
             fechaActualizacion: new Date().toISOString()
         };
 
-        await window.fbSetDoc(
-            window.fbDoc(db, "usuarios", user.email, "colmena_final", "datos"),
+        await window.firebaseSetDoc(
+            window.firebaseDoc(db, "usuarios", user.email, "colmena_final", "datos"),
             datos
         );
 
@@ -564,7 +564,7 @@ const batch = window.firebaseWriteBatch(window.firebaseDb); // <--- USA ESTA VER
         const coleccionRef = window.firebaseCollection(db, "usuarios", user.email, "maestro_seriales");
         
         // Primero, eliminar los documentos existentes
-        const docsExistentes = await window.fbGetDocs(coleccionRef);
+        const docsExistentes = await window.firebaseGetDocs(coleccionRef);
         docsExistentes.forEach(doc => {
             batch.delete(doc.ref);
         });
@@ -572,7 +572,7 @@ const batch = window.firebaseWriteBatch(window.firebaseDb); // <--- USA ESTA VER
         // Luego, agregar los nuevos documentos
         SistemaInventario.seriales.forEach(serial => {
             const docId = `${serial.codigo}_${serial.lote}_${serial.paquete}_${serial.serial}`;
-            const docRef = window.fbDoc(coleccionRef, docId);
+            const docRef = window.firebaseDoc(coleccionRef, docId);
             batch.set(docRef, {
                 ...serial,
                 usuario: user.email,
@@ -608,10 +608,10 @@ async function cargarSerialesDesdeFirestore() {
         if (!user) return;
 
         const db = window.firebaseDB;
-        const coleccionRef = window.fbCollection(db, "maestro_seriales");
         
         try {
-            const querySnapshot = await window.fbGetDocs(coleccionRef);
+            const coleccionRef = window.firebaseCollection(db, "usuarios", user.email, "maestro_seriales");
+            const querySnapshot = await window.firebaseGetDocs(coleccionRef);
             
             if (!querySnapshot.empty) {
                 SistemaInventario.seriales = [];
