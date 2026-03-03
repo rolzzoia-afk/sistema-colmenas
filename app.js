@@ -303,6 +303,16 @@ async function guardarColmenaFinalEnFirestore() {
         // Actualizar colmenaActual con el resultado para la sesión actual
         colmenaActual = colmenasFinal;
 
+        // Actualizar SistemaInventario.colmenas y la tabla de la UI para que
+        // coincida con el Excel exportado (colmenas disponibles post-optimización)
+        SistemaInventario.colmenas = colmenasFinal;
+        actualizarTablaColmenas();
+        const estadoEl = document.getElementById('estadoColmenas');
+        if (estadoEl) {
+            estadoEl.textContent = `✓ ${colmenasFinal.length} colmenas (sincronizadas)`;
+            estadoEl.className = 'estado-archivo estado-ok';
+        }
+
         console.log(`✅ Colmena final guardada en Firebase: ${colmenasFinal.length} registros`);
         log(`✅ Colmena final guardada en Firebase (${colmenasFinal.length} colmenas disponibles)`, "success");
     } catch (error) {
