@@ -64,9 +64,13 @@ async function guardarEnFirestore() {
 
       try {
           log("Guardando inventario en Firestore...", "info");
+          const datosAhorro = {
+              data: JSON.stringify(SistemaInventario),
+              fechaActualizacion: new Date().toISOString()
+          };
           await window.fbSetDoc(
               window.fbDoc(db, "usuarios", user.email, "inventario", "datos"),
-              SistemaInventario
+              datosAhorro
           );
           console.log("Inventario guardado en Firestore");
           log("✅ Inventario guardado exitosamente en Firestore", "success");
@@ -84,15 +88,17 @@ async function cargarDesdeFirestore() {
     const db = window.firebaseDB;
 
       try {
-          const collectionRef = window.fbCollection(db, "usuarios", user.email, "inventario");
-          const querySnapshot = await window.fbGetDocs(collectionRef);
+          const docSnap = await window.fbGetDoc(
+              window.fbDoc(db, "usuarios", user.email, "inventario", "datos")
+          );
 
-          // Buscar el documento específico "datos" en la colección
-          const docDatos = querySnapshot.docs.find(doc => doc.id === "datos");
-          
-          if (docDatos) {
-              const datos = docDatos.data();
-              Object.assign(SistemaInventario, datos);
+          if (docSnap.exists()) {
+              const docData = docSnap.data();
+              if (docData.data) {
+                  // Parsear el JSON guardado
+                  const datos = JSON.parse(docData.data);
+                  Object.assign(SistemaInventario, datos);
+              }
               console.log("Inventario cargado desde Firestore");
           } else {
               console.log("No hay inventario guardado aún.");
