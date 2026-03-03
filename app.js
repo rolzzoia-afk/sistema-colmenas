@@ -807,17 +807,25 @@ function leerExcelCompleto(file) {
 
 // Función para formatear fecha ISO a formato DD/MM/YYYY
 // Maneja tanto strings ISO como objetos Date de JavaScript
-function formatearFecha(fechaISO) {
-    if (!fechaISO || fechaISO === '-' || fechaISO === 'undefined') return '-';
+function formatearFecha(fecha) {
+    if (!fecha || fecha === '-' || fecha === 'undefined') return '-';
+    
+    // Si Excel nos manda un número (como 46083)
+    if (typeof fecha === 'number') {
+        const fechaExcel = new Date((fecha - 25569) * 86400 * 1000);
+        const d = String(fechaExcel.getDate()).padStart(2, '0');
+        const m = String(fechaExcel.getMonth() + 1).padStart(2, '0');
+        const a = fechaExcel.getFullYear();
+        return `${d}/${m}/${a}`;
+    }
+
     try {
-        // Si ya es un objeto de fecha o un string ISO, lo convertimos
-        const date = new Date(fechaISO);
-        if (isNaN(date.getTime())) return fechaISO; // Si falla, devuelve lo que había
-        
-        const dia = String(date.getDate()).padStart(2, '0');
+        const date = new Date(fecha);
+        if (isNaN(date.getTime())) return fecha; 
+        const día = String(date.getDate()).padStart(2, '0');
         const mes = String(date.getMonth() + 1).padStart(2, '0');
-        const ano = date.getFullYear();
-        return `${dia}/${mes}/${ano}`;
+        const año = date.getFullYear();
+        return `${día}/${mes}/${año}`;
     } catch (e) {
         return '-';
     }
