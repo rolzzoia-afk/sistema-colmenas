@@ -54,6 +54,9 @@ function guardarSistema() {
 
 // Función para guardar en Firestore
 async function guardarEnFirestore() {
+    // Mostrar el overlay de carga
+    document.getElementById('loading-overlay').style.display = 'flex';
+    
     try {
         const user = window.firebaseAuth.currentUser;
         if (!user) {
@@ -83,11 +86,17 @@ async function guardarEnFirestore() {
     } catch (error) {
         console.error("Error guardando en Firestore:", error);
         log("❌ Error guardando en Firestore: " + error.message, "error");
+    } finally {
+        // Ocultar el overlay de carga independientemente del resultado
+        document.getElementById('loading-overlay').style.display = 'none';
     }
 }
 
 // Función para cargar desde Firestore
 async function cargarDesdeFirestore() {
+    // Mostrar el overlay de carga
+    document.getElementById('loading-overlay').style.display = 'flex';
+    
     try {
         const user = window.firebaseAuth.currentUser;
         if (!user) {
@@ -97,34 +106,69 @@ async function cargarDesdeFirestore() {
 
         const db = window.firebaseDB;
 
-        // Usar fbDoc para crear una referencia de documento y fbGetDoc para obtenerlo
+        // Crear la referencia al documento
         const docRef = window.fbDoc(db, "usuarios", user.email, "inventario", "datos");
-        const docSnap = await window.fbGetDoc(docRef);
-
-        if (docSnap.exists()) {
-            const docData = docSnap.data();
-            if (docData && docData.data) {
-                // Parsear el JSON guardado para restaurar los arrays originales
-                const datos = JSON.parse(docData.data);
-                
-                // Actualizar el objeto global con los datos recuperados
-                Object.assign(SistemaInventario, datos);
-                
-                console.log("✅ Inventario cargado correctamente desde Firestore");
+        
+        try {
+            // Obtener el documento usando fbGetDoc (singular)
+            const docSnap = await window.fbGetDoc(docRef);
+            
+            if (docSnap && docSnap.exists()) {
+                const docData = docSnap.data();
+                if (docData && docData.data) {
+                    // Parsear el JSON guardado para restaurar los arrays originales
+                    const datos = JSON.parse(docData.data);
+                    
+                    // Actualizar el objeto global con los datos recuperados
+                    Object.assign(SistemaInventario, datos);
+                    
+                    console.log("✅ Inventario cargado correctamente desde Firestore");
+                } else {
+                    console.log("El documento existe pero no contiene datos válidos");
+                }
             } else {
-                console.log("El documento existe pero no contiene datos válidos");
+                console.log("No hay inventario guardado aún en Firestore");
             }
-        } else {
-            console.log("No hay inventario guardado aún en Firestore");
+        } catch (docError) {
+            console.error("Error específico al obtener el documento:", docError);
+            
+            // Intento alternativo usando la sintaxis antigua si la nueva falla
+            try {
+                const docSnap = await window.fbGetDoc(
+                    window.fbDoc(db, "usuarios", user.email, "inventario", "datos")
+                );
+                
+                if (docSnap && docSnap.exists()) {
+                    const docData = docSnap.data();
+                    if (docData && docData.data) {
+                        // Parsear el JSON guardado para restaurar los arrays originales
+                        const datos = JSON.parse(docData.data);
+                        
+                        // Actualizar el objeto global con los datos recuperados
+                        Object.assign(SistemaInventario, datos);
+                        
+                        console.log("✅ Inventario cargado correctamente desde Firestore (método alternativo)");
+                    }
+                }
+            } catch (altError) {
+                console.error("Error en método alternativo:", altError);
+                throw altError; // Re-lanzar para el catch exterior
+            }
         }
     } catch (error) {
         console.error("Error cargando desde Firestore:", error);
         log("❌ Error cargando desde Firestore: " + error.message, "error");
+    } finally {
+        // Ocultar el overlay de carga independientemente del resultado
+        document.getElementById('loading-overlay').style.display = 'none';
     }
 }
 
 // Función para guardar resultados de optimización en Firestore
 async function guardarResultadoOptimizacion(resultados) {
+    // Mostrar el overlay de carga
+    document.getElementById('loading-overlay').style.display = 'flex';
+    
     try {
         const user = window.firebaseAuth.currentUser;
         if (!user) {
@@ -160,6 +204,9 @@ async function guardarResultadoOptimizacion(resultados) {
         console.error("Error guardando resultados de optimización:", error);
         log("❌ Error guardando resultados: " + error.message, "error");
         return Promise.reject(error);
+    } finally {
+        // Ocultar el overlay de carga independientemente del resultado
+        document.getElementById('loading-overlay').style.display = 'none';
     }
 }
 
