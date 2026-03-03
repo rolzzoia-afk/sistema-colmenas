@@ -89,7 +89,7 @@ async function guardarEnFirestore() {
             return;
         }
 
-        const db = window.firebaseDB;
+        const db = window.firebaseDb;
 
         log("Guardando inventario en Firestore...", "info");
         
@@ -129,7 +129,7 @@ async function cargarDesdeFirestore() {
             return;
         }
 
-        const db = window.firebaseDB;
+        const db = window.firebaseDb;
 
         // Crear la referencia al documento
         const docRef = window.firebaseDoc(db, "usuarios", user.email, "inventario", "datos");
@@ -204,7 +204,7 @@ async function guardarResultadoOptimizacion(resultados) {
             return Promise.reject("No hay usuario logueado");
         }
 
-        const db = window.firebaseDB;
+        const db = window.firebaseDb;
 
         // Añadir timestamp a cada resultado
         const timestamp = new Date().toISOString();
@@ -261,7 +261,7 @@ async function cargarColmenaFinalDesdeFirestore() {
         const user = window.firebaseAuth.currentUser;
         if (!user) return;
 
-        const db = window.firebaseDB;
+        const db = window.firebaseDb;
         const docRef = window.firebaseDoc(db, "usuarios", user.email, "colmena_final", "datos");
         const docSnap = await window.firebaseGetDoc(docRef);
 
@@ -299,7 +299,7 @@ async function guardarColmenaFinalEnFirestore() {
             return;
         }
 
-        const db = window.firebaseDB;
+        const db = window.firebaseDb;
 
         // Extraer colmenas disponibles del histórico y mapear al formato simple
         const colmenasFinal = SistemaInventario.colmenasHistorico
@@ -549,7 +549,7 @@ async function guardarSerialesEnFirestore() {
         }
 
         // Usar la instancia db global
-        const db = window.firebaseDB;
+        const db = window.firebaseDb;
         
         if (!db) {
             throw new Error("Firestore no está inicializado");
@@ -558,7 +558,7 @@ async function guardarSerialesEnFirestore() {
         log("Guardando seriales en Firestore...", "info");
         
        // Antes: const batch = writeBatch(window.firebaseDb);
-const batch = window.firebaseWriteBatch(window.firebaseDb); // <--- USA ESTA VERSIÓN
+const batch = window.firebaseWriteBatch(window.firebaseDb);
         
         // Ruta: usuarios/{email}/maestro_seriales
         const coleccionRef = window.firebaseCollection(db, "usuarios", user.email, "maestro_seriales");
@@ -607,7 +607,7 @@ async function cargarSerialesDesdeFirestore() {
         const user = window.firebaseAuth.currentUser;
         if (!user) return;
 
-        const db = window.firebaseDB;
+        const db = window.firebaseDb;
         
         try {
             const coleccionRef = window.firebaseCollection(db, "usuarios", user.email, "maestro_seriales");
