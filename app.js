@@ -1986,8 +1986,8 @@ function exportarResultados() {
         return;
     }
 
-    const datosExcel = [];
-    datosExcel.push(['OT', 'Ubicación', 'Acción', 'Colmena', 'Código', 'Medida (cm)', 'Fecha Serial']);
+const datosExcel = [];
+    datosExcel.push(['OT', 'Ubicación', 'Acción', 'Colmena', 'Código', 'Medida (cm)', 'Lote', 'Paquete', 'Serial', 'Fecha Serial']);
 
     SistemaInventario.resultadosOptimizacion.forEach(item => {
         const orden = item.orden;
@@ -2000,10 +2000,13 @@ function exportarResultados() {
         const textoColmena = resultado.colmena && resultado.colmena !== '' ? resultado.colmena : 'TUBO NUEVO';
         const medida = resultado.medida_cm;
         
-        // Obtener la fecha del serial si existe
+        // Obtener datos del serial con verificación de seguridad
+        const loteSerial = resultado.serial ? (resultado.serial.lote || '-') : '-';
+        const paqueteSerial = resultado.serial ? (resultado.serial.paquete || '-') : '-';
+        const numSerial = resultado.serial ? (resultado.serial.serial || '-') : '-';
         const fechaSerial = resultado.serial ? formatearFecha(resultado.serial.fecha) : '-';
 
-        datosExcel.push([ot, ubic, 'CORTAR', textoColmena, codigoUsado, medida, fechaSerial]);
+        datosExcel.push([ot, ubic, 'CORTAR', textoColmena, codigoUsado, medida, loteSerial, paqueteSerial, numSerial, fechaSerial]);
 
         if (resultado.sobrante_cm && resultado.sobrante_cm > 0) {
             const sobranteEncontrado = SistemaInventario.colmenasHistorico.find(c =>
@@ -2020,6 +2023,9 @@ function exportarResultados() {
                     sobranteEncontrado.n_colmena,
                     sobranteEncontrado.cod,
                     sobranteEncontrado.medida_cm,
+                    '-',
+                    '-',
+                    '-',
                     '-'
                 ]);
             }
@@ -2033,6 +2039,9 @@ function exportarResultados() {
         { wch: 12 },
         { wch: 15 },
         { wch: 20 },
+        { wch: 12 },
+        { wch: 12 },
+        { wch: 15 },
         { wch: 12 },
         { wch: 12 },
         { wch: 15 },
@@ -2149,13 +2158,13 @@ function exportarColmenasDisponibles() {
         const tubosEnColmena = agrupadasPorColmena[nColmena];
         const totalTubos = tubosEnColmena.length;
         
-        datosUbicacion.push(['COLMENA: ' + nColmena + '   |   TOTAL TUBOS: ' + totalTubos]);
-        datosUbicacion.push(['Código', 'Medida (cm)', 'Estado']);
+datosUbicacion.push(['COLMENA: ' + nColmena + '   |   TOTAL TUBOS: ' + totalTubos]);
+        datosUbicacion.push(['Código', 'Medida (cm)', 'Estado', 'Fecha']);
         
         const tubosOrdenados = tubosEnColmena.sort((a, b) => (b.medida_cm || 0) - (a.medida_cm || 0));
         
         tubosOrdenados.forEach(c => {
-            datosUbicacion.push([c.cod, c.medida_cm, c.estado]);
+            datosUbicacion.push([c.cod, c.medida_cm, c.estado, formatearFecha(c.fecha_registro || c.fecha)]);
         });
         
         if (idx < clavesColmena.length - 1) {
