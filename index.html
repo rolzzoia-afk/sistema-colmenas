@@ -193,15 +193,16 @@
   } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
 
   import { 
-    getFirestore,
-    collection,
-    addDoc,
-    getDocs,
-    getDoc,
-    deleteDoc,
-    doc,
-    setDoc
-  } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+  getFirestore,
+  collection,
+  addDoc,
+  getDocs,
+  getDoc,
+  deleteDoc,
+  doc,
+  setDoc,
+  writeBatch // <--- AGREGA ESTO AQUÍ
+} from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
   const firebaseConfig = {
   apiKey: "AIzaSyBUQVqyC3ti4hLbuBT8U4zINUWU3u07Dmw",
@@ -222,7 +223,8 @@
 
   // 🔥 Firestore
   const db = getFirestore(app);
-  window.firebaseDB = db;
+  window.firebaseDb = getFirestore(app);
+window.firebaseWriteBatch = writeBatch; // <--- AGREGA ESTA LÍNEA
 
   window.fbCollection = collection;
   window.fbAddDoc = addDoc;

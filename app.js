@@ -57,6 +57,21 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }, 100);
 });
+function formatearFecha(fecha) {
+    if (!fecha || fecha === '-' || fecha === 'undefined') return '-';
+    
+    // Si la fecha viene como número de Excel (ej: 46083)
+    if (typeof fecha === 'number' && fecha > 40000) {
+        const dExcel = new Date((fecha - 25569) * 86400 * 1000);
+        return `${String(dExcel.getDate()).padStart(2,'0')}/${String(dExcel.getMonth()+1).padStart(2,'0')}/${dExcel.getFullYear()}`;
+    }
+
+    try {
+        const d = new Date(fecha);
+        if (isNaN(d.getTime())) return fecha;
+        return `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}/${d.getFullYear()}`;
+    } catch(e) { return '-'; }
+}
 // Función para guardar el sistema en localStorage
 function guardarSistema() {
     localStorage.setItem('sistemaInventario', JSON.stringify(SistemaInventario));
@@ -542,8 +557,8 @@ async function guardarSerialesEnFirestore() {
         
         log("Guardando seriales en Firestore...", "info");
         
-        // Crear el batch usando la instancia db
-        const batch = writeBatch(db);
+       // Antes: const batch = writeBatch(window.firebaseDb);
+const batch = window.firebaseWriteBatch(window.firebaseDb); // <--- USA ESTA VERSIÓN
         
         // Ruta: usuarios/{email}/maestro_seriales
         const coleccionRef = window.fbCollection(db, "usuarios", user.email, "maestro_seriales");
@@ -807,29 +822,7 @@ function leerExcelCompleto(file) {
 
 // Función para formatear fecha ISO a formato DD/MM/YYYY
 // Maneja tanto strings ISO como objetos Date de JavaScript
-function formatearFecha(fecha) {
-    if (!fecha || fecha === '-' || fecha === 'undefined') return '-';
-    
-    // Si Excel nos manda un número (como 46083)
-    if (typeof fecha === 'number') {
-        const fechaExcel = new Date((fecha - 25569) * 86400 * 1000);
-        const d = String(fechaExcel.getDate()).padStart(2, '0');
-        const m = String(fechaExcel.getMonth() + 1).padStart(2, '0');
-        const a = fechaExcel.getFullYear();
-        return `${d}/${m}/${a}`;
-    }
 
-    try {
-        const date = new Date(fecha);
-        if (isNaN(date.getTime())) return fecha; 
-        const día = String(date.getDate()).padStart(2, '0');
-        const mes = String(date.getMonth() + 1).padStart(2, '0');
-        const año = date.getFullYear();
-        return `${día}/${mes}/${año}`;
-    } catch (e) {
-        return '-';
-    }
-}
 
 
 function formatearNumero(valor) {
