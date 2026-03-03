@@ -94,6 +94,43 @@ async function cargarDesdeFirestore() {
     }
 }
 
+// Función para guardar resultados de optimización en Firestore
+async function guardarResultadoOptimizacion(resultados) {
+    const user = window.firebaseAuth.currentUser;
+    if (!user) {
+        console.error("No hay usuario logueado");
+        return Promise.reject("No hay usuario logueado");
+    }
+
+    const db = window.firebaseDB;
+
+    try {
+        // Añadir timestamp a cada resultado
+        const timestamp = new Date().toISOString();
+        
+        const datosConTimestamp = {
+            usuario: user.email,
+            timestamp: timestamp,
+            resultados: resultados.map(r => ({
+                ...r,
+                fechaGuardado: timestamp
+            }))
+        };
+
+        // Guardar en la colección 'historial_optimizaciones'
+        await window.fbAddDoc(
+            window.fbCollection(db, "historial_optimizaciones"),
+            datosConTimestamp
+        );
+
+        console.log("✅ Resultados de optimización guardados en historial:", timestamp);
+        return Promise.resolve(timestamp);
+    } catch (error) {
+        console.error("Error guardando resultados de optimización:", error);
+        return Promise.reject(error);
+    }
+}
+
 // Función para cargar el sistema desde localStorage
 function cargarSistema() {
     const datosGuardados = localStorage.getItem('sistemaInventario');
@@ -214,17 +251,143 @@ function formatearNumero(valor) {
     return null;
 }
 
-function parsearNumero(valor) {
-    if (valor === null || valor === undefined || valor === '') return null;
-    if (typeof valor === 'number') return valor;
-    if (typeof valor === 'string') {
-        const num = parseFloat(valor.replace(',', '.'));
-        return isNaN(num) ? null : num;
-    }
-    return null;
-}
+  function parsearNumero(valor) {
+      if (valor === null || valor === undefined || valor === '') return null;
+      if (typeof valor === 'number') return valor;
+      if (typeof valor === 'string') {
+          const num = parseFloat(valor.replace(',', '.'));
+          return isNaN(num) ? null : num;
+      }
+      return null;
+  }
 
-function extraerCodigoDesdeTuberia(tuberia) {
+  // Función para validar y limpiar datos de órdenes o colmenas
+  function validarYLimpiarDatos(datos, tipo) {
+      if (!Array.isArray(datos) || datos.length === 0) {
+          console.warn("No hay datos para validar");
+          return [];
+      }
+
+      const datosLimpios = [];
+
+      if (tipo === 'orden') {
+          // Validar órdenes: debe tener 'Pedido' y 'Medida'
+          for (let i = 0; i < datos.length; i++) {
+              const item = datos[i];
+              
+              // Verificar que tenga las propiedades requeridas
+              if (!item.hasOwnProperty('Pedido') || !item.hasOwnProperty('Medida')) {
+                  console.warn(`Registro ${i + 1} eliminado: falta 'Pedido' o 'Medida'`);
+                  continue;
+              }
+
+              // Verificar que los datos no estén vacíos
+              const pedido = item.Pedido;
+              const medidaRaw = item.Medida;
+
+              if (pedido === null || pedido === undefined || String(pedido).trim() === '') {
+                  console.warn(`Registro ${i + 1} eliminado: Pedido vacío`);
+                  continue;
+              }
+
+              // Convertir Medida a número (float)
+              let medidaNum = null;
+              if (medidaRaw !== null && medidaRaw !== undefined && medidaRaw !== '') {
+                  if (typeof medidaRaw === 'number') {
+                      medidaNum = parseFloat(medidaRaw);
+                  } else if (typeof medidaRaw === 'string') {
+                      medidaNum = parseFloat(String(medidaRaw).replace(',', '.'));
+                  }
+              }
+
+              if (medidaNum === null || isNaN(medidaNum) || medidaNum <= 0) {
+                  console.warn(`Registro ${i + 1} eliminado: Medida inválida`);
+                  continue;
+              }
+
+              // Normalizar textos (quitar espacios en blanco)
+              const itemLimpio = {
+                  Pedido: String(pedido).trim(),
+                  Medida: medidaNum
+              };
+
+              // Copiar otras propiedades existentes y normalizar códigos
+              for (const key of Object.keys(item)) {
+                  if (key !== 'Pedido' && key !== 'Medida') {
+                      let valor = item[key];
+                      if (typeof valor === 'string') {
+                          valor = valor.trim();
+                      }
+                      itemLimpio[key] = valor;
+                  }
+              }
+
+              datosLimpios.push(itemLimpio);
+          }
+      } else if (tipo === 'colmena') {
+          // Validar colmenas: debe tener 'N° Colmena' y 'Medida (cm)'
+          for (let i = 0; i < datos.length; i++) {
+              const item = datos[i];
+              
+              // Verificar que tenga las propiedades requeridas
+              if (!item.hasOwnProperty('N° Colmena') || !item.hasOwnProperty('Medida (cm)')) {
+                  console.warn(`Registro ${i + 1} eliminado: falta 'N° Colmena' o 'Medida (cm)'`);
+                  continue;
+              }
+
+              // Verificar que los datos no estén vacíos
+              const nColmena = item['N° Colmena'];
+              const medidaRaw = item['Medida (cm)'];
+
+              if (nColmena === null || nColmena === undefined || String(nColmena).trim() === '') {
+                  console.warn(`Registro ${i + 1} eliminado: N° Colmena vacío`);
+                  continue;
+              }
+
+              // Convertir Medida (cm) a número
+              let medidaNum = null;
+              if (medidaRaw !== null && medidaRaw !== undefined && medidaRaw !== '') {
+                  if (typeof medidaRaw === 'number') {
+                      medidaNum = parseFloat(medidaRaw);
+                  } else if (typeof medidaRaw === 'string') {
+                      medidaNum = parseFloat(String(medidaRaw).replace(',', '.'));
+                  }
+              }
+
+              if (medidaNum === null || isNaN(medidaNum) || medidaNum <= 0) {
+                  console.warn(`Registro ${i + 1} eliminado: Medida (cm) inválida`);
+                  continue;
+              }
+
+              // Normalizar textos (quitar espacios en blanco)
+              const itemLimpio = {
+                  'N° Colmena': String(nColmena).trim(),
+                  'Medida (cm)': medidaNum
+              };
+
+              // Copiar otras propiedades existentes y normalizar códigos
+              for (const key of Object.keys(item)) {
+                  if (key !== 'N° Colmena' && key !== 'Medida (cm)') {
+                      let valor = item[key];
+                      if (typeof valor === 'string') {
+                          valor = valor.trim();
+                      }
+                      itemLimpio[key] = valor;
+                  }
+              }
+
+              datosLimpios.push(itemLimpio);
+          }
+      } else {
+          console.error("Tipo no válido. Use 'orden' o 'colmena'");
+          return [];
+      }
+
+      console.log(`✅ Validación completada: ${datosLimpios.length} registros válidos de ${datos.length}`);
+      return datosLimpios;
+  }
+
+  function extraerCodigoDesdeTuberia(tuberia) {
     if (!tuberia) return null;
     const str = String(tuberia).trim();
     const match = str.match(/_([A-Za-z0-9]+)$/);
@@ -599,6 +762,291 @@ function actualizarTablaMermas() {
         }
         return `<tr><td>${m.orden}</td><td>${m.espacioOriginal}</td><td>${m.codigoOriginal}</td><td>${formatearValor(m.medidaRequerida)}</td><td>${tipoBadge}</td><td>${formatearValor(m.valor)} cm</td><td>${m.codigoUsado}</td></tr>`;
     }).join('');
+}
+
+// Función principal para ejecutar el algoritmo de optimización
+function ejecutarAlgoritmoOptimización(ordenes, colmenas) {
+    // Validar que los arrays no estén vacíos
+    if (!Array.isArray(ordenes) || ordenes.length === 0) {
+        console.error("No hay órdenes para optimizar");
+        return { resultados: [], totalMerma: 0 };
+    }
+    
+    if (!Array.isArray(colmenas) || colmenas.length === 0) {
+        console.error("No hay colmenas para asignar");
+        return { resultados: [], totalMerma: 0 };
+    }
+
+    // Ordenar las órdenes de mayor a menor (First-Fit Decreasing)
+    const ordenesOrdenadas = [...ordenes].sort((a, b) => {
+        const medidaA = typeof a.medida === 'number' ? a.medida : (parseFloat(a.medida) || 0);
+        const medidaB = typeof b.medida === 'number' ? b.medida : (parseFloat(b.medida) || 0);
+        return medidaB - medidaA;
+    });
+
+    // Crear una copia de las colmenas para manipulate durante la asignación
+    const colmenasDisponibles = colmenas.map(c => ({
+        ...c,
+        estado: 'Disponible',
+        medidaOriginal: typeof c['Medida (cm)'] === 'number' ? c['Medida (cm)'] : (parseFloat(c['Medida (cm)']) || 0)
+    }));
+
+    const resultados = [];
+    let totalMerma = 0;
+
+    // Recorrer cada orden y buscar la primera colmena disponible
+    for (let i = 0; i < ordenesOrdenadas.length; i++) {
+        const orden = ordenesOrdenadas[i];
+        
+        // Obtener la medida de la orden
+        const medidaOrden = typeof orden.medida === 'number' ? orden.medida : (parseFloat(orden.medida) || 0);
+        
+        // Buscar la primera colmena donde quepa la orden
+        let colmenaAsignada = null;
+        let indiceColmena = -1;
+        
+        for (let j = 0; j < colmenasDisponibles.length; j++) {
+            const colmena = colmenasDisponibles[j];
+            
+            if (colmena.estado === 'Disponible' && colmena.medidaOriginal >= medidaOrden) {
+                colmenaAsignada = colmena;
+                indiceColmena = j;
+                break;
+            }
+        }
+
+        if (colmenaAsignada) {
+            // Marcar la colmena como ocupada
+            colmenasDisponibles[indiceColmena].estado = 'Ocupada';
+            
+            // Calcular la merma
+            const merma = colmenaAsignada.medidaOriginal - medidaOrden;
+            totalMerma += merma;
+
+            // Guardar la asignación en el resultado
+            resultados.push({
+                orden: orden,
+                colmena: colmenaAsignada,
+                medidaOrden: medidaOrden,
+                medidaColmena: colmenaAsignada.medidaOriginal,
+                merma: merma,
+                asignada: true,
+                mensaje: `Orden asignada a colmena ${colmenaAsignada['N° Colmena'] || colmenaAsignada.n_colmena}`
+            });
+        } else {
+            // La orden no cabe en ninguna colmena
+            resultados.push({
+                orden: orden,
+                colmena: null,
+                medidaOrden: medidaOrden,
+                medidaColmena: null,
+                merma: 0,
+                asignada: false,
+                mensaje: 'No Asignada: No hay colmena disponible con medida suficiente'
+            });
+        }
+    }
+
+    console.log(`✅ Optimización completada: ${resultados.filter(r => r.asignada).length} órdenes asignadas, ${resultados.filter(r => !r.asignada).length} no asignadas`);
+    console.log(`📊 Total merma: ${totalMerma.toFixed(2)} cm`);
+
+    return {
+        resultados: resultados,
+        totalMerma: totalMerma
+    };
+}
+
+// Función asíncrona para ejecutar el flujo completo desde el botón "Ejecutar"
+async function ejecutarFlujoCompleto() {
+    console.log("🚀 Iniciando flujo completo de optimización...");
+    
+    // Obtener datos de las variables globales
+    const ordenes = SistemaInventario.ordenes;
+    const colmenas = SistemaInventario.colmenas;
+
+    // Validar que existan datos
+    if (!ordenes || ordenes.length === 0) {
+        const mensajeError = "❌ Error: No hay órdenes cargadas";
+        console.error(mensajeError);
+        log(mensajeError, 'error');
+        return;
+    }
+
+    if (!colmenas || colmenas.length === 0) {
+        const mensajeError = "❌ Error: No hay colmenas cargadas";
+        console.error(mensajeError);
+        log(mensajeError, 'error');
+        return;
+    }
+
+    // Limpiar el panel de logs y resultados
+    document.getElementById('logs').innerHTML = '';
+    document.getElementById('proceso').innerHTML = '';
+    document.getElementById('resultados').innerHTML = '';
+
+    log("📋 Validando datos de órdenes...", 'info');
+    
+    // Validar y limpiar órdenes
+    const ordenesValidadas = validarYLimpiarDatos(ordenes, 'orden');
+    
+    if (ordenesValidadas.length === 0) {
+        const mensajeError = "❌ Error: No hay órdenes válidas después de la validación";
+        console.error(mensajeError);
+        log(mensajeError, 'error');
+        return;
+    }
+
+    log(`✓ Órdenes validadas: ${ordenesValidadas.length} registros válidos`, 'success');
+
+    log("📦 Validando datos de colmenas...", 'info');
+    
+    // Validar y limpiar colmenas
+    const colmenasValidadas = validarYLimpiarDatos(colmenas, 'colmena');
+    
+    if (colmenasValidadas.length === 0) {
+        const mensajeError = "❌ Error: No hay colmenas válidas después de la validación";
+        console.error(mensajeError);
+        log(mensajeError, 'error');
+        return;
+    }
+
+    log(`✓ Colmenas validadas: ${colmenasValidadas.length} registros válidos`, 'success');
+
+    // Ejecutar el algoritmo de optimización
+    log("⚙️ Ejecutando algoritmo de optimización...", 'info');
+    
+    const resultadoOptimizacion = ejecutarAlgoritmoOptimización(ordenesValidadas, colmenasValidadas);
+    
+    if (!resultadoOptimizacion || resultadoOptimizacion.resultados.length === 0) {
+        const mensajeError = "❌ Error: No se pudieron generar resultados de optimización";
+        console.error(mensajeError);
+        log(mensajeError, 'error');
+        return;
+    }
+
+    const asignadas = resultadoOptimizacion.resultados.filter(r => r.asignada).length;
+    const noAsignadas = resultadoOptimizacion.resultados.filter(r => !r.asignada).length;
+    
+    log(`✅ Optimización completada: ${asignadas} órdenes asignadas, ${noAsignadas} no asignadas`, 'success');
+    log(`📊 Total merma: ${resultadoOptimizacion.totalMerma.toFixed(2)} cm`, 'info');
+
+    // Guardar resultados en Firebase
+    log("💾 Guardando resultados en Firebase...", 'info');
+    
+    try {
+        await guardarResultadoOptimizacion(resultadoOptimizacion.resultados);
+        log("✅ Resultados guardados en historial de Firebase", 'success');
+    } catch (error) {
+        console.error("Error al guardar en Firebase:", error);
+        log("⚠️ Warning: No se pudieron guardar los resultados en Firebase", 'warn');
+    }
+
+    // Actualizar el DOM con los resultados
+    const divResultados = document.getElementById('resultados');
+    divResultados.innerHTML = `
+        <div class="resumen-resultado">
+            <h3>✓ Optimización Completada</h3>
+            <p><strong>Total de órdenes:</strong> ${resultadoOptimizacion.resultados.length}</p>
+            <p><strong>Órdenes asignadas:</strong> ${asignadas}</p>
+            <p><strong>Órdenes no asignadas:</strong> ${noAsignadas}</p>
+            <p><strong>Total Merma:</strong> ${resultadoOptimizacion.totalMerma.toFixed(2)} cm</p>
+        </div>
+    `;
+
+    // Llenar la tabla de mermas con las asignaciones
+    const tbodyMermas = document.getElementById('tbodyMermas');
+    if (tbodyMermas) {
+        tbodyMermas.innerHTML = resultadoOptimizacion.resultados
+            .filter(r => r.asignada)
+            .map(r => {
+                const pedido = r.orden.Pedido || r.orden.id || 'N/A';
+                const nColmena = r.colmena['N° Colmena'] || r.colmena.n_colmena || 'N/A';
+                return `<tr>
+                    <td>${pedido}</td>
+                    <td>${nColmena}</td>
+                    <td>${r.medidaOrden}</td>
+                    <td>${r.medidaColmena}</td>
+                    <td>${r.merma.toFixed(2)}</td>
+                </tr>`;
+            }).join('');
+    }
+
+    // Habilitar botón de exportar si existe
+    const btnExportar = document.getElementById('btnExportar');
+    if (btnExportar) {
+        btnExportar.disabled = false;
+    }
+
+    const btnExportarDisponibles = document.getElementById('btnExportarDisponibles');
+    if (btnExportarDisponibles) {
+        btnExportarDisponibles.disabled = false;
+    }
+
+    log("🎉 Flujo completo ejecutado exitosamente", 'success');
+    console.log("🚀 Flujo completo terminado", resultadoOptimizacion);
+}
+
+// Función para exportar resultados a Excel usando SheetJS (XLSX)
+function exportarResultadosExcel(resultados) {
+    if (!resultados || resultados.length === 0) {
+        const mensajeError = "❌ Error: No hay resultados para exportar";
+        console.error(mensajeError);
+        log(mensajeError, 'error');
+        alert("No hay resultados para exportar. Ejecute la optimización primero.");
+        return;
+    }
+
+    console.log("📊 Exportando resultados a Excel...", resultados);
+
+    // Crear un nuevo libro de trabajo
+    const wb = XLSX.utils.book_new();
+
+    // Convertir el array de resultados en formato para SheetJS
+    const datosParaExcel = resultados.map(r => {
+        return {
+            'Pedido': r.orden && r.orden.Pedido ? r.orden.Pedido : (r.orden && r.orden.id ? r.orden.id : 'N/A'),
+            'Colmena': r.colmena && r.colmena['N° Colmena'] ? r.colmena['N° Colmena'] : (r.colmena && r.colmena.n_colmena ? r.colmena.n_colmena : 'N/A'),
+            'Medida Orden (cm)': r.medidaOrden || 0,
+            'Medida Colmena (cm)': r.medidaColmena || 0,
+            'Merma (cm)': r.asignada ? (r.merma ? r.merma.toFixed(2) : '0.00') : 'No Asignada',
+            'Estado': r.asignada ? 'Asignada' : 'No Asignada'
+        };
+    });
+
+    // Crear la hoja con los datos
+    const ws = XLSX.utils.json_to_sheet(datosParaExcel);
+
+    // Dar formato a las columnas para que sean legibles
+    const colWidths = [
+        { wch: 20 },  // Pedido
+        { wch: 15 },  // Colmena
+        { wch: 18 },  // Medida Orden
+        { wch: 18 },  // Medida Colmena
+        { wch: 15 },  // Merma
+        { wch: 15 }   // Estado
+    ];
+    ws['!cols'] = colWidths;
+
+    // Agregar la hoja al libro
+    XLSX.utils.book_append_sheet(wb, ws, 'Plan de Optimización');
+
+    // Generar el nombre del archivo con la fecha actual
+    const fechaActual = new Date();
+    const año = fechaActual.getFullYear();
+    const mes = String(fechaActual.getMonth() + 1).padStart(2, '0');
+    const dia = String(fechaActual.getDate()).padStart(2, '0');
+    const fechaStr = `${año}${mes}${dia}`;
+    
+    const nombreArchivo = `Optimizacion_Rolzzo_${fechaStr}.xlsx`;
+
+    // Generar y descargar el archivo
+    XLSX.writeFile(wb, nombreArchivo);
+
+    // Añadir log de éxito
+    const mensajeExito = `✅ Archivo ${nombreArchivo} descargado exitosamente`;
+    console.log(mensajeExito);
+    log(mensajeExito, 'success');
+    alert(`Resultados exportados exitosamente a: ${nombreArchivo}`);
 }
 
 function ejecutarOptimizacion() {
