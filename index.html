@@ -159,7 +159,8 @@
     addDoc,
     getDocs,
     deleteDoc,
-    doc
+    doc,
+    setDoc
   } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
   const firebaseConfig = {
@@ -188,6 +189,7 @@
   window.fbGetDocs = getDocs;
   window.fbDeleteDoc = deleteDoc;
   window.fbDoc = doc;
+  window.fbSetDoc = setDoc;
 
   window.firebaseSignOut = signOut;
 </script>

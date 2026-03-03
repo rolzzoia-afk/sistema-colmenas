@@ -54,21 +54,27 @@ function guardarSistema() {
 
 // Función para guardar en Firestore
 async function guardarEnFirestore() {
-    const user = window.firebaseAuth.currentUser;
-    if (!user) return;
+      const user = window.firebaseAuth.currentUser;
+      if (!user) {
+          log("No hay usuario logueado para guardar en Firestore", "error");
+          return;
+      }
 
-    const db = window.firebaseDB;
+      const db = window.firebaseDB;
 
-    try {
-        await window.fbSetDoc(
-            window.fbDoc(db, "usuarios", user.email, "inventario", "datos"),
-            SistemaInventario
-        );
-        console.log("Inventario guardado en Firestore");
-    } catch (error) {
-        console.error("Error guardando en Firestore:", error);
-    }
-}
+      try {
+          log("Guardando inventario en Firestore...", "info");
+          await window.fbSetDoc(
+              window.fbDoc(db, "usuarios", user.email, "inventario", "datos"),
+              SistemaInventario
+          );
+          console.log("Inventario guardado en Firestore");
+          log("✅ Inventario guardado exitosamente en Firestore", "success");
+      } catch (error) {
+          console.error("Error guardando en Firestore:", error);
+          log("❌ Error guardando en Firestore: " + error.message, "error");
+      }
+  }
 
 // Función para cargar desde Firestore
 async function cargarDesdeFirestore() {
