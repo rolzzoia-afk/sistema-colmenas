@@ -54,93 +54,111 @@ function guardarSistema() {
 
 // Función para guardar en Firestore
 async function guardarEnFirestore() {
-      const user = window.firebaseAuth.currentUser;
-      if (!user) {
-          log("No hay usuario logueado para guardar en Firestore", "error");
-          return;
-      }
+    try {
+        const user = window.firebaseAuth.currentUser;
+        if (!user) {
+            log("No hay usuario logueado para guardar en Firestore", "error");
+            return;
+        }
 
-      const db = window.firebaseDB;
+        const db = window.firebaseDB;
 
-      try {
-          log("Guardando inventario en Firestore...", "info");
-          const datosAhorro = {
-              data: JSON.stringify(SistemaInventario),
-              fechaActualizacion: new Date().toISOString()
-          };
-          await window.fbSetDoc(
-              window.fbDoc(db, "usuarios", user.email, "inventario", "datos"),
-              datosAhorro
-          );
-          console.log("Inventario guardado en Firestore");
-          log("✅ Inventario guardado exitosamente en Firestore", "success");
-      } catch (error) {
-          console.error("Error guardando en Firestore:", error);
-          log("❌ Error guardando en Firestore: " + error.message, "error");
-      }
-  }
+        log("Guardando inventario en Firestore...", "info");
+        
+        // Convertir todo el objeto SistemaInventario a string para evitar problemas con arrays anidados
+        const sistemaInventarioString = JSON.stringify(SistemaInventario);
+        
+        const datosAhorro = {
+            data: sistemaInventarioString,
+            fechaActualizacion: new Date().toISOString()
+        };
+        
+        await window.fbSetDoc(
+            window.fbDoc(db, "usuarios", user.email, "inventario", "datos"),
+            datosAhorro
+        );
+        
+        console.log("✅ Inventario guardado en Firestore correctamente");
+        log("✅ Inventario guardado exitosamente en Firestore", "success");
+    } catch (error) {
+        console.error("Error guardando en Firestore:", error);
+        log("❌ Error guardando en Firestore: " + error.message, "error");
+    }
+}
 
 // Función para cargar desde Firestore
 async function cargarDesdeFirestore() {
-    const user = window.firebaseAuth.currentUser;
-    if (!user) return;
+    try {
+        const user = window.firebaseAuth.currentUser;
+        if (!user) {
+            console.log("No hay usuario logueado para cargar desde Firestore");
+            return;
+        }
 
-    const db = window.firebaseDB;
+        const db = window.firebaseDB;
 
-      try {
-          const docSnap = await window.fbGetDoc(
-              window.fbDoc(db, "usuarios", user.email, "inventario", "datos")
-          );
+        // Usar fbDoc para crear una referencia de documento y fbGetDoc para obtenerlo
+        const docRef = window.fbDoc(db, "usuarios", user.email, "inventario", "datos");
+        const docSnap = await window.fbGetDoc(docRef);
 
-          if (docSnap.exists()) {
-              const docData = docSnap.data();
-              if (docData.data) {
-                  // Parsear el JSON guardado
-                  const datos = JSON.parse(docData.data);
-                  Object.assign(SistemaInventario, datos);
-              }
-              console.log("Inventario cargado desde Firestore");
-          } else {
-              console.log("No hay inventario guardado aún.");
-          }
-      } catch (error) {
-          console.error("Error cargando desde Firestore:", error);
-      }
+        if (docSnap.exists()) {
+            const docData = docSnap.data();
+            if (docData && docData.data) {
+                // Parsear el JSON guardado para restaurar los arrays originales
+                const datos = JSON.parse(docData.data);
+                
+                // Actualizar el objeto global con los datos recuperados
+                Object.assign(SistemaInventario, datos);
+                
+                console.log("✅ Inventario cargado correctamente desde Firestore");
+            } else {
+                console.log("El documento existe pero no contiene datos válidos");
+            }
+        } else {
+            console.log("No hay inventario guardado aún en Firestore");
+        }
+    } catch (error) {
+        console.error("Error cargando desde Firestore:", error);
+        log("❌ Error cargando desde Firestore: " + error.message, "error");
+    }
 }
 
 // Función para guardar resultados de optimización en Firestore
 async function guardarResultadoOptimizacion(resultados) {
-    const user = window.firebaseAuth.currentUser;
-    if (!user) {
-        console.error("No hay usuario logueado");
-        return Promise.reject("No hay usuario logueado");
-    }
-
-    const db = window.firebaseDB;
-
     try {
+        const user = window.firebaseAuth.currentUser;
+        if (!user) {
+            console.error("No hay usuario logueado");
+            return Promise.reject("No hay usuario logueado");
+        }
+
+        const db = window.firebaseDB;
+
         // Añadir timestamp a cada resultado
         const timestamp = new Date().toISOString();
+        
+        // Convertir los resultados a string para evitar problemas con arrays anidados
+        const resultadosString = JSON.stringify(resultados.map(r => ({
+            ...r,
+            fechaGuardado: timestamp
+        })));
         
         const datosConTimestamp = {
             usuario: user.email,
             timestamp: timestamp,
-            resultados: resultados.map(r => ({
-                ...r,
-                fechaGuardado: timestamp
-            }))
+            resultadosString: resultadosString
         };
 
-        // Guardar en la colección 'historial_optimizaciones'
-        await window.fbAddDoc(
-            window.fbCollection(db, "historial_optimizaciones"),
-            datosConTimestamp
-        );
+        // Guardar en la colección 'historial_optimizaciones' usando una referencia de documento
+        const docRef = window.fbDoc(db, "historial_optimizaciones", timestamp + "_" + user.email);
+        await window.fbSetDoc(docRef, datosConTimestamp);
 
         console.log("✅ Resultados de optimización guardados en historial:", timestamp);
+        log("✅ Resultados de optimización guardados correctamente", "success");
         return Promise.resolve(timestamp);
     } catch (error) {
         console.error("Error guardando resultados de optimización:", error);
+        log("❌ Error guardando resultados: " + error.message, "error");
         return Promise.reject(error);
     }
 }
