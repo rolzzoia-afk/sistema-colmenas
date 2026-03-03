@@ -536,27 +536,38 @@ async function guardarSerialesEnFirestore() {
         
         log("Guardando seriales en Firestore...", "info");
         
-        // Guardar cada serial como un documento individual en la colección maestro_seriales
-        const batch = window.firebase.firestore().batch();
-        const coleccionRef = window.fbCollection(db, "maestro_seriales");
+        // Crear la ruta correcta para guardar los seriales
+        const coleccionRef = window.fbCollection(db, "usuarios", user.email, "maestro_seriales");
         
         // Primero, eliminar los documentos existentes
-        const docsExistentes = await window.fbGetDocs(coleccionRef);
-        docsExistentes.forEach(doc => {
-            batch.delete(doc.ref);
-        });
-        
-        // Luego, agregar los nuevos documentos
-        SistemaInventario.seriales.forEach(serial => {
-            const docRef = window.fbDoc(coleccionRef, `${serial.codigo}_${serial.lote}_${serial.paquete}_${serial.serial}`);
-            batch.set(docRef, {
-                ...serial,
-                usuario: user.email,
-                fechaActualizacion: new Date().toISOString()
+        try {
+            const docsExistentes = await window.fbGetDocs(coleccionRef);
+            // Eliminar documentos uno por uno ya que no tenemos batch
+            const promesasEliminacion = [];
+            docsExistentes.forEach(doc => {
+                promesasEliminacion.push(window.fbDeleteDoc(doc.ref));
             });
+            await Promise.all(promesasEliminacion);
+        } catch (error) {
+            console.log("No hay documentos previos o error al eliminar:", error);
+            // Continuar con la creación de nuevos documentos
+        }
+        
+        // Luego, agregar los nuevos documentos uno por uno
+        const promesasCreacion = [];
+        SistemaInventario.seriales.forEach(serial => {
+            const docId = `${serial.codigo}_${serial.lote}_${serial.paquete}_${serial.serial}`;
+            const docRef = window.fbDoc(db, "usuarios", user.email, "maestro_seriales", docId);
+            promesasCreacion.push(
+                window.fbSetDoc(docRef, {
+                    ...serial,
+                    usuario: user.email,
+                    fechaActualizacion: new Date().toISOString()
+                })
+            );
         });
         
-        await batch.commit();
+        await Promise.all(promesasCreacion);
         
         console.log(`✅ ${SistemaInventario.seriales.length} seriales guardados en Firestore`);
         log(`✅ ${SistemaInventario.seriales.length} seriales guardados en Firestore`, "success");
