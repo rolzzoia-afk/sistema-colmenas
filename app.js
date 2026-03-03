@@ -79,10 +79,13 @@ async function cargarDesdeFirestore() {
 
       try {
           const collectionRef = window.fbCollection(db, "usuarios", user.email, "inventario");
-          const docSnap = await window.fbGetDocs(collectionRef);
+          const querySnapshot = await window.fbGetDocs(collectionRef);
 
-          if (!docSnap.empty) {
-              const datos = docSnap.docs[0].data();
+          // Buscar el documento específico "datos" en la colección
+          const docDatos = querySnapshot.docs.find(doc => doc.id === "datos");
+          
+          if (docDatos) {
+              const datos = docDatos.data();
               Object.assign(SistemaInventario, datos);
               console.log("Inventario cargado desde Firestore");
           } else {
