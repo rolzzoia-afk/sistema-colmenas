@@ -808,11 +808,18 @@ function leerExcelCompleto(file) {
 // Función para formatear fecha ISO a formato DD/MM/YYYY
 // Maneja tanto strings ISO como objetos Date de JavaScript
 function formatearFecha(fechaISO) {
-    // Si la fecha viene vacía, null, undefined o es una cadena vacía, retornar '-'
-    if (!fechaISO || fechaISO === '' || fechaISO === null || fechaISO === undefined) {
+    if (!fechaISO || fechaISO === '-') return '-';
+    try {
+        const date = new Date(fechaISO);
+        if (isNaN(date.getTime())) return '-';
+        const día = String(date.getDate()).padStart(2, '0');
+        const mes = String(date.getMonth() + 1).padStart(2, '0');
+        const año = date.getFullYear();
+        return `${día}/${mes}/${año}`;
+    } catch (e) {
         return '-';
     }
-    
+}
     let fecha;
     
     // Determinar si es un string o un objeto Date
@@ -852,7 +859,7 @@ function formatearFecha(fechaISO) {
     const año = fecha.getFullYear();
     
     return `${dia}/${mes}/${año}`;
-}
+
 
 function formatearNumero(valor) {
     if (valor === null || valor === undefined || valor === '') return null;
@@ -2004,7 +2011,7 @@ const datosExcel = [];
         const loteSerial = resultado.serial ? (resultado.serial.lote || '-') : '-';
         const paqueteSerial = resultado.serial ? (resultado.serial.paquete || '-') : '-';
         const numSerial = resultado.serial ? (resultado.serial.serial || '-') : '-';
-        const fechaSerial = resultado.serial ? formatearFecha(resultado.serial.fecha) : '-';
+        const fechaSerial = (resultado.serial && resultado.serial.fecha) ? formatearFecha(resultado.serial.fecha) : '-';
 
         datosExcel.push([ot, ubic, 'CORTAR', textoColmena, codigoUsado, medida, loteSerial, paqueteSerial, numSerial, fechaSerial]);
 
@@ -2057,24 +2064,27 @@ const datosExcel = [];
 }
 
 function exportarColmenasDisponibles() {
-    if (SistemaInventario.colmenasHistorico.length === 0) { alert('No hay resultados para exportar. Ejecute la optimización primero.'); return; }
+    // 1. Definimos el encabezado con la palabra 'Fecha'
+    const encabezado = ['Código', 'Medida (cm)', 'Estado', 'Fecha'];
 
-    const colmenasDisponiblesFiltradas = SistemaInventario.colmenasHistorico.filter(c => c.estado === 'disponible');
-
-    if (colmenasDisponiblesFiltradas.length === 0) { alert('No hay colmenas disponibles para exportar.'); return; }
+    // 2. Mapeamos usando colmenasHistorico y agregamos la fecha formateada
+    const filas = SistemaInventario.colmenasHistorico.map(c => [
+        c.cod || c.n_colmena || '-',
+        c.medida_cm || 0,
+        c.estado || 'disponible',
+        formatearFecha(c.fecha_registro || c.fecha || new Date().toISOString())
+    ]);
 
     const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.aoa_to_sheet([encabezado, ...filas]);
+    XLSX.utils.book_append_sheet(wb, ws, "UBICACION_COLMENAS");
 
-    const estiloTitulo = { 
-        font: { bold: true, sz: 14, color: { rgb: '000000' } }, 
-        fill: { fgColor: { rgb: 'E8E8E8' } },
-        border: { 
-            top: { style: 'medium', color: { rgb: '000000' } },
-            bottom: { style: 'medium', color: { rgb: '000000' } },
-            left: { style: 'medium', color: { rgb: '000000' } },
-            right: { style: 'medium', color: { rgb: '000000' } }
-        }
-    };
+    const nombreArchivo = `colmenas_disponibles_${new Date().toISOString().slice(0,10)}.xlsx`;
+    XLSX.writeFile(wb, nombreArchivo);
+    log(`✅ Reporte exportado exitosamente con fechas`, 'success');
+}
+        
+    ;
     
     const estiloEncabezado = { 
         font: { bold: true, sz: 12, color: { rgb: '000000' } }, 
@@ -2374,7 +2384,7 @@ datosUbicacion.push(['COLMENA: ' + nColmena + '   |   TOTAL TUBOS: ' + totalTubo
     XLSX.writeFile(wb, nombreArchivo);
     log(`✅ Colmenas disponibles exportadas a ${nombreArchivo}`, 'success');
     alert(`Colmenas disponibles exportadas exitosamente a: ${nombreArchivo}`);
-}
+
 function mostrarLogin() {
   document.body.innerHTML = `
     <div style="
@@ -2420,3 +2430,20 @@ function cerrarSesion() {
 }
 
 window.cerrarSesion = cerrarSesion;
+function formatearFecha(fechaISO) {
+    if (!fechaISO || fechaISO === '-') return '-';
+    try {
+        // Si la fecha ya viene en formato DD/MM/YYYY, no la tocamos
+        if (typeof fechaISO === 'string' && fechaISO.includes('/') && fechaISO.length <= 10) return fechaISO;
+        
+        const date = new Date(fechaISO);
+        if (isNaN(date.getTime())) return '-';
+        
+        const dia = String(date.getDate()).padStart(2, '0');
+        const mes = String(date.getMonth() + 1).padStart(2, '0');
+        const ano = date.getFullYear();
+        return `${dia}/${mes}/${ano}`;
+    } catch (e) {
+        return '-';
+    }
+}
