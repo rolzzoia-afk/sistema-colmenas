@@ -33,10 +33,10 @@
         .badge-nueva { background-color: #f39c12; }
         .badge-reemplazo { background-color: #3498db; }
         .tabla-scroll { max-height: 300px; overflow-y: auto; }
+        #btnLogout { float: right; background-color: #e74c3c; color: white; border: none; padding: 8px 15px; border-radius: 5px; cursor: pointer; }
     </style>
 </head>
 <body>
-    <!-- Loading Overlay -->
     <div id="loading-overlay" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0, 0, 0, 0.7); z-index: 9999; justify-content: center; align-items: center; flex-direction: column;">
       <div class="spinner" style="width: 50px; height: 50px; border: 5px solid #f3f3f3; border-top: 5px solid #3498db; border-radius: 50%; animation: spin 1s linear infinite;"></div>
       <p style="color: white; margin-top: 15px; font-family: Arial, sans-serif; font-size: 16px;">Sincronizando con la nube de Rolzzo...</p>
@@ -49,31 +49,26 @@
       }
     </style>
     
-    <button id="btnLogout">Cerrar sesión</button>
+    <button id="btnLogout" onclick="cerrarSesion()">Cerrar sesión</button>
     <h1>🔧 Optimizador Rolzzo V54</h1>
     
     <div class="carga-archivos">
         <h2>📁 Cargar Archivos Excel</h2>
-        
         <div class="archivo-item">
             <label><strong>Archivo de Órdenes:</strong></label>
             <input type="file" id="fileOrdenes" accept=".xlsx,.xlsm" class="file-input" onchange="cargarOrdenes(event)">
             <span id="estadoOrdenes" class="estado-archivo estado-pendiente">Sin cargar</span>
         </div>
-        
         <div class="archivo-item">
             <label><strong>Archivo de Colmenas:</strong></label>
             <input type="file" id="fileColmenas" accept=".xlsx,.xlsm" class="file-input" onchange="cargarColmenas(event)">
             <span id="estadoColmenas" class="estado-archivo estado-pendiente">Sin cargar</span>
-            <div id="indicadorFuenteColmena" style="display:none; margin-top:8px; padding:6px 12px; border-radius:4px; color:white; font-size:12px; font-weight:bold;"></div>
         </div>
-        
         <div class="archivo-item">
             <label><strong>Archivo de Catálogo de Reemplazos:</strong></label>
             <input type="file" id="fileCatalogo" accept=".xlsx,.xlsm" class="file-input" onchange="cargarCatalogo(event)">
             <span id="estadoCatalogo" class="estado-archivo estado-pendiente">Sin cargar</span>
         </div>
-        
         <div class="archivo-item">
             <label><strong>Archivo de Estructura de Inventario:</strong></label>
             <input type="file" id="fileEstructura" accept=".xlsx,.xlsm" class="file-input" onchange="cargarEstructuraInventario(event)">
@@ -88,42 +83,28 @@
     <div class="container">
         <div class="panel">
             <h2>📦 Datos</h2>
-            
             <h3>Órdenes</h3>
             <div class="tabla-scroll">
                 <table id="tablaOrdenes"><thead><tr id="headerOrdenes"></tr></thead><tbody id="tbodyOrdenes"><tr><td>Sin datos</td></tr></tbody></table>
             </div>
-
             <h3>Colmenas</h3>
             <div class="tabla-scroll">
                 <table id="tablaColmenas"><thead><tr><th>N° Colmena</th><th>Código</th><th>Medida (cm)</th></tr></thead><tbody id="tbodyColmenas"><tr><td>Sin datos</td></tr></tbody></table>
             </div>
-
             <h3>📋 Catálogo de Reemplazos</h3>
             <div class="tabla-scroll">
                 <table id="tablaReemplazos"><thead><tr><th>Código</th><th>Reemplazo</th></tr></thead><tbody id="tbodyReemplazos"><tr><td>Sin datos</td></tr></tbody></table>
             </div>
-            
             <h3>🏷️ Seriales Disponibles</h3>
             <div class="tabla-scroll">
                 <table id="tablaSeriales">
                     <thead>
-                        <tr>
-                            <th>Código</th>
-                            <th>Fecha</th>
-                            <th>Lote</th>
-                            <th>Paquete</th>
-                            <th>Serial</th>
-                            <th>Estado</th>
-                        </tr>
+                        <tr><th>Código</th><th>Fecha</th><th>Lote</th><th>Paquete</th><th>Serial</th><th>Estado</th></tr>
                     </thead>
-                    <tbody id="tbodySeriales">
-                        <tr><td colspan="6">Sin datos</td></tr>
-                    </tbody>
+                    <tbody id="tbodySeriales"><tr><td colspan="6">Sin datos</td></tr></tbody>
                 </table>
             </div>
         </div>
-
         <div class="panel">
             <h2>⚙️ Proceso</h2>
             <div id="proceso"></div>
@@ -136,53 +117,10 @@
     </div>
 
     <div class="panel" style="margin-top:20px;">
-        <h2>📦 Colmenas Después de Optimización</h2>
-        <div class="tabla-scroll">
-            <table id="tablaColmenasResultado">
-                <thead>
-                    <tr>
-                        <th>N° Colmena</th>
-                        <th>Código</th>
-                        <th>Código Original</th>
-                        <th>Medida (cm)</th>
-                        <th>Estado</th>
-                        <th>Origen</th>
-                    </tr>
-                </thead>
-                <tbody id="tbodyColmenasResultado">
-                    <tr><td colspan="6">Sin datos</td></tr>
-                </tbody>
-            </table>
-        </div>
-    </div>
-
-    <div class="panel" style="margin-top:20px;">
-        <h2>✂️ Mermas y Reuso de Espacio</h2>
-        <div class="tabla-scroll">
-            <table id="tablaMermas">
-                <thead>
-                    <tr>
-                        <th>Orden</th>
-                        <th>Espacio Original (N° Colmena)</th>
-                        <th>Código Original</th>
-                        <th>Medida Requerida (cm)</th>
-                        <th>Tipo</th>
-                        <th>Valor (cm)</th>
-                        <th>Código Usado</th>
-                    </tr>
-                </thead>
-                <tbody id="tbodyMermas">
-                    <tr><td colspan="7">Sin datos</td></tr>
-                </tbody>
-            </table>
-        </div>
-    </div>
-
-    <div class="panel" style="margin-top:20px;">
         <h2>📝 Logs</h2>
         <div class="log-container" id="logs"></div>
     </div>
-<!-- Firebase -->
+
 <script type="module">
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
   import { 
@@ -193,49 +131,50 @@
   } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
 
   import { 
-  getFirestore,
-  collection,
-  addDoc,
-  getDocs,
-  getDoc,
-  deleteDoc,
-  doc,
-  setDoc,
-  writeBatch // <--- AGREGA ESTO AQUÍ
-} from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+    getFirestore,
+    collection,
+    addDoc,
+    getDocs,
+    getDoc,
+    deleteDoc,
+    doc,
+    setDoc,
+    writeBatch
+  } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
   const firebaseConfig = {
-  apiKey: "AIzaSyBUQVqyC3ti4hLbuBT8U4zINUWU3u07Dmw",
-  authDomain: "inventario-colmenas.firebaseapp.com",
-  projectId: "inventario-colmenas",
-  storageBucket: "inventario-colmenas.firebasestorage.app",
-  messagingSenderId: "412114089031",
-  appId: "1:412114089031:web:de2aedf856272598ae6d62"
-};
+    apiKey: "AIzaSyBUQVqyC3ti4hLbuBT8U4zINUWU3u07Dmw",
+    authDomain: "inventario-colmenas.firebaseapp.com",
+    projectId: "inventario-colmenas",
+    storageBucket: "inventario-colmenas.firebasestorage.app",
+    messagingSenderId: "412114089031",
+    appId: "1:412114089031:web:de2aedf856272598ae6d62"
+  };
 
   const app = initializeApp(firebaseConfig);
 
-  // 🔐 Auth
+  // 🔐 Auth - Exportar a Window
   const auth = getAuth(app);
   window.firebaseAuth = auth;
   window.firebaseSignIn = signInWithEmailAndPassword;
   window.firebaseOnAuth = onAuthStateChanged;
-
-  // 🔥 Firestore
-  const db = getFirestore(app);
-  window.firebaseDb = getFirestore(app);
-window.firebaseWriteBatch = writeBatch; // <--- AGREGA ESTA LÍNEA
-
-  window.fbCollection = collection;
-  window.fbAddDoc = addDoc;
-  window.fbGetDocs = getDocs;
-  window.fbGetDoc = getDoc;
-  window.fbDeleteDoc = deleteDoc;
-  window.fbDoc = doc;
-  window.fbSetDoc = setDoc;
-
   window.firebaseSignOut = signOut;
+
+  // 🔥 Firestore - Exportar a Window (Nombres unificados para app.js)
+  const db = getFirestore(app);
+  window.firebaseDb = db;
+  window.firebaseCollection = collection;
+  window.firebaseGetDocs = getDocs;
+  window.firebaseGetDoc = getDoc;
+  window.firebaseAddDoc = addDoc;
+  window.firebaseDeleteDoc = deleteDoc;
+  window.firebaseDoc = doc;
+  window.firebaseSetDoc = setDoc;
+  window.firebaseWriteBatch = writeBatch;
+
+  console.log("🔥 Firebase inicializado y funciones exportadas correctamente.");
 </script>
-    <script src="app.js"></script>
+
+<script src="app.js"></script>
 </body>
 </html>
