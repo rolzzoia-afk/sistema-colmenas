@@ -12,6 +12,10 @@ const SistemaInventario = {
     colmenasHistorico: [],
     mermas: []
 };
+
+// Variables globales para manejo de colmena desde Firebase
+let colmenaActual = null;        // Colmena descargada de Firebase al inicio de sesión
+let usandoColmenaManual = false; // true si el usuario subió un archivo manualmente
 // prueba push
 // Verificar sesión activa
 document.addEventListener("DOMContentLoaded", () => {
@@ -155,6 +159,9 @@ async function cargarDesdeFirestore() {
                 throw altError; // Re-lanzar para el catch exterior
             }
         }
+
+        // Cargar colmena_final específica desde Firebase (no bloquea si falla)
+        await cargarColmenaFinalDesdeFirestore();
     } catch (error) {
         console.error("Error cargando desde Firestore:", error);
         log("❌ Error cargando desde Firestore: " + error.message, "error");
@@ -209,6 +216,104 @@ async function guardarResultadoOptimizacion(resultados) {
         document.getElementById('loading-overlay').style.display = 'none';
     }
 }
+
+// ─── FUNCIONES DE COLMENA FINAL (Firebase) ───────────────────────────────────
+
+// Actualiza el indicador visual de fuente de colmena en la UI
+function actualizarIndicadorFuente(esManual) {
+    const indicador = document.getElementById('indicadorFuenteColmena');
+    if (!indicador) return;
+    if (esManual) {
+        indicador.textContent = '📂 Usando inventario manual cargado';
+        indicador.style.backgroundColor = '#27ae60';
+        indicador.style.display = 'inline-block';
+    } else {
+        indicador.textContent = '☁️ Usando inventario sincronizado de Firebase';
+        indicador.style.backgroundColor = '#3498db';
+        indicador.style.display = 'inline-block';
+    }
+}
+
+// Carga la colmena_final guardada en Firebase y la asigna a colmenaActual
+async function cargarColmenaFinalDesdeFirestore() {
+    try {
+        const user = window.firebaseAuth.currentUser;
+        if (!user) return;
+
+        const db = window.firebaseDB;
+        const docRef = window.fbDoc(db, "usuarios", user.email, "colmena_final", "datos");
+        const docSnap = await window.fbGetDoc(docRef);
+
+        if (docSnap && docSnap.exists()) {
+            const docData = docSnap.data();
+            if (docData && docData.data) {
+                colmenaActual = JSON.parse(docData.data);
+                console.log(`✅ Colmena final cargada desde Firebase: ${colmenaActual.length} registros`);
+                actualizarIndicadorFuente(false);
+                verificarListo();
+            }
+        } else {
+            // Sin colmena_final guardada: usar SistemaInventario.colmenas como fallback
+            if (SistemaInventario.colmenas && SistemaInventario.colmenas.length > 0) {
+                colmenaActual = SistemaInventario.colmenas;
+                console.log(`ℹ️ Sin colmena_final en Firebase. Usando colmenas del inventario (${colmenaActual.length})`);
+                actualizarIndicadorFuente(false);
+                verificarListo();
+            } else {
+                console.log("ℹ️ No hay colmena_final ni colmenas en inventario aún.");
+            }
+        }
+    } catch (error) {
+        console.error("Error cargando colmena_final desde Firestore:", error);
+    }
+}
+
+// Guarda las colmenas disponibles post-optimización en Firebase como colmena_final
+async function guardarColmenaFinalEnFirestore() {
+    document.getElementById('loading-overlay').style.display = 'flex';
+    try {
+        const user = window.firebaseAuth.currentUser;
+        if (!user) {
+            log("No hay usuario logueado para guardar colmena final", "error");
+            return;
+        }
+
+        const db = window.firebaseDB;
+
+        // Extraer colmenas disponibles del histórico y mapear al formato simple
+        const colmenasFinal = SistemaInventario.colmenasHistorico
+            .filter(c => c.estado === 'disponible')
+            .map(c => ({
+                n_colmena: c.n_colmena,
+                medida_mm: c.medida_mm,
+                medida_cm: c.medida_cm,
+                cod: c.cod
+            }));
+
+        const datos = {
+            data: JSON.stringify(colmenasFinal),
+            fechaActualizacion: new Date().toISOString()
+        };
+
+        await window.fbSetDoc(
+            window.fbDoc(db, "usuarios", user.email, "colmena_final", "datos"),
+            datos
+        );
+
+        // Actualizar colmenaActual con el resultado para la sesión actual
+        colmenaActual = colmenasFinal;
+
+        console.log(`✅ Colmena final guardada en Firebase: ${colmenasFinal.length} registros`);
+        log(`✅ Colmena final guardada en Firebase (${colmenasFinal.length} colmenas disponibles)`, "success");
+    } catch (error) {
+        console.error("Error guardando colmena_final en Firestore:", error);
+        log("❌ Error guardando colmena final en Firebase: " + error.message, "error");
+    } finally {
+        document.getElementById('loading-overlay').style.display = 'none';
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 // Función para cargar el sistema desde localStorage
 function cargarSistema() {
@@ -619,6 +724,9 @@ async function cargarColmenas(event) {
         document.getElementById('estadoColmenas').className = 'estado-archivo estado-ok';
         verificarListo();
         log(`📦 Colmenas cargadas: ${SistemaInventario.colmenas.length}`, 'success');
+        // Marcar como manual y actualizar indicador
+        usandoColmenaManual = true;
+        actualizarIndicadorFuente(true);
         guardarSistema();
     } catch (e) { alert('Error: ' + e.message); }
 }
@@ -688,7 +796,11 @@ function actualizarTablaCatalogo() {
     document.getElementById('tbodyReemplazos').innerHTML = items || '<tr><td>Sin datos</td></tr>';
 }
 
-function verificarListo() { document.getElementById('btnEjecutar').disabled = !(SistemaInventario.ordenes.length > 0 && SistemaInventario.colmenas.length > 0); }
+function verificarListo() {
+    const tieneOrdenes = SistemaInventario.ordenes.length > 0;
+    const tieneColmenas = SistemaInventario.colmenas.length > 0 || (colmenaActual && colmenaActual.length > 0);
+    document.getElementById('btnEjecutar').disabled = !(tieneOrdenes && tieneColmenas);
+}
 
 function log(mensaje, tipo) {
     SistemaInventario.logs.push({ mensaje, tipo });
@@ -1129,18 +1241,25 @@ function exportarResultadosExcel(resultados) {
 }
 
 function ejecutarOptimizacion() {
-    if (SistemaInventario.ordenes.length === 0 || SistemaInventario.colmenas.length === 0) { alert('Cargue órdenes y colmenas'); return; }
+    // Determinar fuente de colmenas: archivo manual o colmena sincronizada de Firebase
+    const colmenasAUsar = usandoColmenaManual
+        ? SistemaInventario.colmenas
+        : (colmenaActual && colmenaActual.length > 0 ? colmenaActual : SistemaInventario.colmenas);
+
+    if (SistemaInventario.ordenes.length === 0 || colmenasAUsar.length === 0) { alert('Cargue órdenes y colmenas'); return; }
+
+    log(`ℹ️ Fuente de colmenas: ${usandoColmenaManual ? 'Archivo manual' : 'Firebase (sincronizado)'}`, 'info');
 
     document.getElementById('logs').innerHTML = '';
     document.getElementById('proceso').innerHTML = '';
     document.getElementById('resultados').innerHTML = '';
     SistemaInventario.logs = [];
-    SistemaInventario.colmenasDisponibles = JSON.parse(JSON.stringify(SistemaInventario.colmenas));
+    SistemaInventario.colmenasDisponibles = JSON.parse(JSON.stringify(colmenasAUsar));
     SistemaInventario.colmenasHistorico = [];
     SistemaInventario.resultadosOptimizacion = [];
     SistemaInventario.mermas = [];
 
-    SistemaInventario.colmenas.forEach((col) => {
+    colmenasAUsar.forEach((col) => {
         SistemaInventario.colmenasHistorico.push({ n_colmena: col.n_colmena, medida_cm: col.medida_cm, medida_mm: col.medida_mm, cod: col.cod, codigo_original: col.cod, estado: 'disponible', origen: 'Original', posicionOriginal: col.n_colmena });
     });
 
@@ -1290,7 +1409,7 @@ function ejecutarOptimizacion() {
                 resultado = { orden: orden.id, medida_cm: orden.medida_cm, fuente: 'tubo_nuevo', codigo_original: codOrden, sobrante_cm: sobranteNuevo / 10 };
                 const posicionesOcupadas = new Set(SistemaInventario.colmenasHistorico.map(c => c.n_colmena));
                 let posicionNueva = null;
-                for (let i = 1; i <= SistemaInventario.colmenas.length + 100; i++) {
+                for (let i = 1; i <= colmenasAUsar.length + 100; i++) {
                     const pos = 'A' + i;
                     if (!posicionesOcupadas.has(pos)) { posicionNueva = pos; break; }
                 }
@@ -1361,6 +1480,10 @@ function ejecutarOptimizacion() {
     document.getElementById('resultados').innerHTML = html;
     document.getElementById('btnExportar').disabled = false;
     guardarSistema();
+
+    // Guardar colmena final en Firebase para que sea la base del día siguiente
+    log('💾 Guardando colmena final en Firebase...', 'info');
+    guardarColmenaFinalEnFirestore();
 }
 
 function exportarResultados() {
