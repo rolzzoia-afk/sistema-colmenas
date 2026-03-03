@@ -78,19 +78,19 @@ async function cargarDesdeFirestore() {
     const db = window.firebaseDB;
 
       try {
-        const docRef = window.fbDoc(db, "usuarios", user.email, "inventario", "datos");
-        const docSnap = await window.fbGetDocs(docRef);
+          const collectionRef = window.fbCollection(db, "usuarios", user.email, "inventario");
+          const docSnap = await window.fbGetDocs(collectionRef);
 
-        if (!docSnap.empty) {
-            const datos = docSnap.docs[0].data();
-            Object.assign(SistemaInventario, datos);
-            console.log("Inventario cargado desde Firestore");
-        } else {
-            console.log("No hay inventario guardado aún.");
-        }
-    } catch (error) {
-        console.error("Error cargando desde Firestore:", error);
-    }
+          if (!docSnap.empty) {
+              const datos = docSnap.docs[0].data();
+              Object.assign(SistemaInventario, datos);
+              console.log("Inventario cargado desde Firestore");
+          } else {
+              console.log("No hay inventario guardado aún.");
+          }
+      } catch (error) {
+          console.error("Error cargando desde Firestore:", error);
+      }
 }
 
 // Función para guardar resultados de optimización en Firestore
