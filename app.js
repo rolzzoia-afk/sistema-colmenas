@@ -810,13 +810,17 @@ function leerExcelCompleto(file) {
 function formatearFecha(fechaISO) {
     if (!fechaISO || fechaISO === '-' || fechaISO === 'undefined') return '-';
     try {
+        // Si ya es un objeto de fecha o un string ISO, lo convertimos
         const date = new Date(fechaISO);
-        if (isNaN(date.getTime())) return fechaISO;
+        if (isNaN(date.getTime())) return fechaISO; // Si falla, devuelve lo que había
+        
         const dia = String(date.getDate()).padStart(2, '0');
         const mes = String(date.getMonth() + 1).padStart(2, '0');
         const ano = date.getFullYear();
         return `${dia}/${mes}/${ano}`;
-    } catch (e) { return '-'; }
+    } catch (e) {
+        return '-';
+    }
 }
 
 
@@ -2023,24 +2027,17 @@ const datosExcel = [];
 }
 
 function exportarColmenasDisponibles() {
-    // 1. Definimos el encabezado con la palabra 'Fecha'
     const encabezado = ['Código', 'Medida (cm)', 'Estado', 'Fecha'];
-
-    // 2. Mapeamos usando colmenasHistorico y agregamos la fecha formateada
     const filas = SistemaInventario.colmenasHistorico.map(c => [
         c.cod || c.n_colmena || '-',
         c.medida_cm || 0,
         c.estado || 'disponible',
         formatearFecha(c.fecha_registro || c.fecha || new Date().toISOString())
     ]);
-
     const wb = XLSX.utils.book_new();
     const ws = XLSX.utils.aoa_to_sheet([encabezado, ...filas]);
     XLSX.utils.book_append_sheet(wb, ws, "UBICACION_COLMENAS");
-
-    const nombreArchivo = `colmenas_disponibles_${new Date().toISOString().slice(0,10)}.xlsx`;
-    XLSX.writeFile(wb, nombreArchivo);
-    log(`✅ Reporte exportado exitosamente con fechas`, 'success');
+    XLSX.writeFile(wb, `colmenas_disponibles_${new Date().toISOString().slice(0,10)}.xlsx`);
 }
 
 function mostrarLogin() {
