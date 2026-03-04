@@ -1307,15 +1307,11 @@ function actualizarTablaMermas() {
         return;
     }
     if (SistemaInventario.mermas.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="7">Sin mermas</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="4">Sin mermas</td></tr>';
         return;
     }
     tbody.innerHTML = SistemaInventario.mermas.map(m => {
-        let tipoBadge = '';
-        if (m.tipo === 'MERMA') {
-            tipoBadge = '<span style="background-color: #e67e22; color: white; padding: 2px 6px; border-radius: 3px; font-size: 10px;">MERMA</span>';
-        }
-        return `<tr><td>${m.orden}</td><td>${m.espacioOriginal}</td><td>${m.codigoOriginal}</td><td>${formatearValor(m.medidaRequerida)}</td><td>${tipoBadge}</td><td>${formatearValor(m.valor)} cm</td><td>${m.codigoUsado}</td></tr>`;
+        return `<tr><td>${m.orden}</td><td>${m.espacioOriginal}</td><td>${m.codigoOriginal}</td><td>${formatearValor(m.valor)} cm</td></tr>`;
     }).join('');
 }
 
@@ -1655,7 +1651,7 @@ function ejecutarOptimizacion() {
             const esReemplazo = tuboEncontrado.esReemplazo;
             let fuente = esMerma ? 'merma' : (esReemplazo ? 'reemplazo' : 'colmena');
 
-            resultado = { orden: orden.id, medida_cm: orden.medida_cm, fuente: fuente, colmena: tuboEncontrado.colmena.n_colmena, codigo: tuboEncontrado.colmena.cod, codigo_original: codOrden, sobrante_cm: tuboEncontrado.sobrante_mm / 10 };
+            resultado = { orden: orden.id, medida_cm: orden.medida_cm, fuente: fuente, colmena: tuboEncontrado.colmena.n_colmena, codigo: tuboEncontrado.colmena.cod, codigo_original: codOrden, sobrante_cm: tuboEncontrado.sobrante_mm / 10, serial: tuboEncontrado.colmena.serial || null };
             const idxHistorico = SistemaInventario.colmenasHistorico.findIndex(c => c.n_colmena === tuboEncontrado.colmena.n_colmena);
             const sobrante = tuboEncontrado.medidaOriginal - orden.medida_mm - MM_KERF;
             const clasificacion = evaluarSobrante(sobrante);
@@ -1685,17 +1681,18 @@ function ejecutarOptimizacion() {
                 
                 const idxInsertar = SistemaInventario.colmenasHistorico.findIndex(c => c.n_colmena === tuboEncontrado.colmena.n_colmena);
                 if (idxInsertar !== -1) {
-                    SistemaInventario.colmenasHistorico.splice(idxInsertar + 1, 0, { 
-                        n_colmena: tuboEncontrado.colmena.n_colmena, 
-                        medida_cm: sobrante / 10, 
-                        medida_mm: sobrante, 
-                        cod: tuboEncontrado.colmena.cod, 
-                        codigo_original: tuboEncontrado.colmena.cod, 
-                        estado: 'disponible', 
-                        origen: 'Sobrante orden ' + orden.id, 
-                        posicionOriginal: tuboEncontrado.colmena.n_colmena,
-                        serial: tuboEncontrado.colmena.serial || orden.serial || null
-                    });
+                SistemaInventario.colmenasHistorico.splice(idxInsertar + 1, 0, { 
+                    n_colmena: tuboEncontrado.colmena.n_colmena, 
+                    medida_cm: sobrante / 10, 
+                    medida_mm: sobrante, 
+                    cod: tuboEncontrado.colmena.cod, 
+                    codigo_original: tuboEncontrado.colmena.cod, 
+                    estado: 'disponible', 
+                    origen: 'Sobrante orden ' + orden.id, 
+                    posicionOriginal: tuboEncontrado.colmena.n_colmena,
+                    serial: tuboEncontrado.colmena.serial || orden.serial || null,
+                    fecha: tuboEncontrado.colmena.serial ? tuboEncontrado.colmena.serial.fecha : null
+                });
                 }
                 SistemaInventario.colmenasDisponibles.push({
                     n_colmena: tuboEncontrado.colmena.n_colmena,
@@ -1722,7 +1719,8 @@ function ejecutarOptimizacion() {
                             colmena: tuboReemplazo.colmena.n_colmena, 
                             codigo_original: tuboReemplazo.colmena.cod, 
                             codigo_reemplazo: codReemplazo, 
-                            sobrante_cm: tuboReemplazo.sobrante_mm / 10 
+                            sobrante_cm: tuboReemplazo.sobrante_mm / 10,
+                            serial: tuboReemplazo.colmena.serial || null
                         };
                         const idxHistorico = SistemaInventario.colmenasHistorico.findIndex(c => c.n_colmena === tuboReemplazo.colmena.n_colmena);
                         const sobrante = tuboReemplazo.medidaOriginal - orden.medida_mm - MM_KERF;
@@ -1793,12 +1791,21 @@ function ejecutarOptimizacion() {
                 
                 const sobranteNuevo = MM_TUBO_ORIGINAL - orden.medida_mm - MM_KERF;
                 
-                // Crear el resultado con información del serial si está disponible
+                // Calcular posición nueva ANTES de crear el resultado para poder incluirla en res.colmena
+                const posicionesOcupadas = new Set(SistemaInventario.colmenasHistorico.map(c => c.n_colmena));
+                let posicionNueva = null;
+                for (let i = 1; i <= colmenasAUsar.length + 100; i++) {
+                    const pos = 'A' + i;
+                    if (!posicionesOcupadas.has(pos)) { posicionNueva = pos; break; }
+                }
+                
+                // Crear el resultado con información del serial y colmena asignada
                 if (serialDisponible) {
                     resultado = { 
                         orden: orden.id, 
                         medida_cm: orden.medida_cm, 
-                        fuente: 'tubo_nuevo', 
+                        fuente: 'tubo_nuevo',
+                        colmena: posicionNueva,
                         codigo_original: codOrden, 
                         sobrante_cm: sobranteNuevo / 10,
                         serial: serialDisponible
@@ -1812,19 +1819,13 @@ function ejecutarOptimizacion() {
                     resultado = { 
                         orden: orden.id, 
                         medida_cm: orden.medida_cm, 
-                        fuente: 'tubo_nuevo', 
+                        fuente: 'tubo_nuevo',
+                        colmena: posicionNueva,
                         codigo_original: codOrden, 
                         sobrante_cm: sobranteNuevo / 10
                     };
                     
                     log(`⚠️ No se encontró serial disponible para el código ${codOrden}`, 'warn');
-                }
-                
-                const posicionesOcupadas = new Set(SistemaInventario.colmenasHistorico.map(c => c.n_colmena));
-                let posicionNueva = null;
-                for (let i = 1; i <= colmenasAUsar.length + 100; i++) {
-                    const pos = 'A' + i;
-                    if (!posicionesOcupadas.has(pos)) { posicionNueva = pos; break; }
                 }
                 
                 const codigoTuboNuevo = codOrden || 'TUBO-NUEVO';
@@ -1842,7 +1843,7 @@ function ejecutarOptimizacion() {
                     estado: 'usada', 
                     origen: `Orden ${orden.id} (Tubo nuevo)${infoSerial}`, 
                     posicionOriginal: posicionNueva,
-                    serial: serialDisponible
+                    serial: serialDisponible || null
                 });
                 
                 const clasificacion = evaluarSobrante(sobranteNuevo);
@@ -1860,14 +1861,17 @@ function ejecutarOptimizacion() {
                                 codigo_original: codigoTuboNuevo, 
                                 estado: 'disponible', 
                                 origen: `Sobrante tubo nuevo orden ${orden.id}${infoSerial}`, 
-                                posicionOriginal: colmenaExistente.n_colmena
+                                posicionOriginal: colmenaExistente.n_colmena,
+                                serial: serialDisponible || null,
+                                fecha: serialDisponible ? serialDisponible.fecha : null
                             });
                         }
                         SistemaInventario.colmenasDisponibles.push({
                             n_colmena: colmenaExistente.n_colmena,
                             medida_mm: sobranteNuevo,
                             medida_cm: sobranteNuevo / 10,
-                            cod: codigoTuboNuevo
+                            cod: codigoTuboNuevo,
+                            serial: serialDisponible || null
                         });
                     } else {
                         SistemaInventario.colmenasHistorico.push({ 
@@ -1878,13 +1882,16 @@ function ejecutarOptimizacion() {
                             codigo_original: codigoTuboNuevo, 
                             estado: 'disponible', 
                             origen: `Sobrante tubo nuevo orden ${orden.id}${infoSerial}`, 
-                            posicionOriginal: posicionNueva
+                            posicionOriginal: posicionNueva,
+                            serial: serialDisponible || null,
+                            fecha: serialDisponible ? serialDisponible.fecha : null
                         });
                         SistemaInventario.colmenasDisponibles.push({
                             n_colmena: posicionNueva,
                             medida_mm: sobranteNuevo,
                             medida_cm: sobranteNuevo / 10,
-                            cod: codigoTuboNuevo
+                            cod: codigoTuboNuevo,
+                            serial: serialDisponible || null
                         });
                     }
                 }
@@ -1964,15 +1971,15 @@ function exportarResultados() {
         if (res.sobrante_cm > 0) {
             datosExcel.push([
                 ord.ot || '-', 
-                ord.ubic || '-', 
+                '', 
                 'GUARDAR SOBRANTE', 
-                res.colmena || 'TUBO NUEVO', 
+                res.colmena || '-', 
                 res.codigo || ord.cod || '-', 
                 res.sobrante_cm,
-                s.lote || '-', 
-                s.paquete || '-', 
-                s.serial || '-', 
-                fechaFormateada
+                s.lote || ord.lote || '-', 
+                s.paquete || ord.paquete || '-', 
+                s.serial || ord.serial || '-', 
+                s.fecha || ord.fecha || '-'
             ]);
         }
     });
@@ -1995,7 +2002,7 @@ function exportarColmenasDisponibles() {
                 c.cod || '-',
                 c.medida_cm || 0,
                 c.estado,
-                formatearFecha(c.fecha || new Date()),
+                formatearFecha(s.fecha || c.fecha || '-'),
                 s.lote || '-',
                 s.paquete || '-',
                 s.serial || '-'
