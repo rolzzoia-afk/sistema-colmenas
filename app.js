@@ -1966,91 +1966,40 @@ function ejecutarOptimizacion() {
 }
 
 function exportarResultados() {
-    if (SistemaInventario.resultadosOptimizacion.length === 0) {
-        alert('No hay resultados para exportar.');
-        return;
-    }
-
-const datosExcel = [];
-    datosExcel.push(['OT', 'Ubicación', 'Acción', 'Colmena', 'Código', 'Medida (cm)', 'Lote', 'Paquete', 'Serial', 'Fecha Serial']);
-
-    SistemaInventario.resultadosOptimizacion.forEach(item => {
-        const orden = item.orden;
-        const resultado = item.resultado;
-        const ordenOriginal = SistemaInventario.ordenes[resultado.orden - 1] || {};
-
-        const ot = ordenOriginal.ot || '';
-        const ubic = ordenOriginal.ubic || '';
-        const codigoUsado = resultado.codigo || resultado.codigo_original || '';
-        const textoColmena = resultado.colmena && resultado.colmena !== '' ? resultado.colmena : 'TUBO NUEVO';
-        const medida = resultado.medida_cm;
-        
-        // Obtener datos del serial con verificación de seguridad
-        const loteSerial = resultado.serial ? (resultado.serial.lote || '-') : '-';
-        const paqueteSerial = resultado.serial ? (resultado.serial.paquete || '-') : '-';
-        const numSerial = resultado.serial ? (resultado.serial.serial || '-') : '-';
-        const fechaSerial = (resultado.serial && resultado.serial.fecha) ? formatearFecha(resultado.serial.fecha) : '-';
-
-        datosExcel.push([ot, ubic, 'CORTAR', textoColmena, codigoUsado, medida, loteSerial, paqueteSerial, numSerial, fechaSerial]);
-
-        if (resultado.sobrante_cm && resultado.sobrante_cm > 0) {
-            const sobranteEncontrado = SistemaInventario.colmenasHistorico.find(c =>
-                c.estado === 'disponible' &&
-                c.origen &&
-                c.origen.toLowerCase().includes('orden ' + resultado.orden)
-            );
-
-            if (sobranteEncontrado) {
-                datosExcel.push([
-                    ot,
-                    '',
-                    'GUARDAR SOBRANTE',
-                    sobranteEncontrado.n_colmena,
-                    sobranteEncontrado.cod,
-                    sobranteEncontrado.medida_cm,
-                    '-',
-                    '-',
-                    '-',
-                    '-'
-                ]);
-            }
-        }
-    });
-
-    const wb = XLSX.utils.book_new();
-    const ws = XLSX.utils.aoa_to_sheet(datosExcel);
-
-    ws['!cols'] = [
-        { wch: 12 },
-        { wch: 15 },
-        { wch: 20 },
-        { wch: 12 },
-        { wch: 12 },
-        { wch: 15 },
-        { wch: 12 },
-        { wch: 12 },
-        { wch: 15 },
-        { wch: 15 }
-    ];
-
-    XLSX.utils.book_append_sheet(wb, ws, 'Plan de Corte');
-
-    const nombreArchivo = `plan_corte_${new Date().toISOString().slice(0,10)}.xlsx`;
-    XLSX.writeFile(wb, nombreArchivo);
-
-    alert('Plan de corte exportado correctamente.');
+    if (SistemaInventario.resultadosOptimizacion.length === 0) return alert('No hay resultados');
+    const datosExcel = [['OT', 'Ubicación', 'Acción', 'Colmena', 'Código', 'Medida (cm)', 'Lote', 'Paquete', 'Serial', 'Fecha Serial']];
+SistemaInventario.resultadosOptimizacion.forEach(item => {
+    const res = item.resultado;
+    const ord = SistemaInventario.ordenes.find(o => o.id === res.orden) || {};
+    
+    // Recuperar serial si existe en la orden o en el resultado
+    const s = res.serial || ord.serial || {};
+    const fechaFormateada = s.fecha ? formatearFecha(s.fecha) : '-';
+    datosExcel.push([
+        ord.ot || '-', ord.ubic || '-', 'CORTAR', 
+        res.colmena || 'TUBO NUEVO', res.codigo || '-', res.medida_cm,
+        s.lote || '-', s.paquete || '-', s.serial || '-', fechaFormateada
+    ]);
+});
+const ws = XLSX.utils.aoa_to_sheet(datosExcel);
+const wb = XLSX.utils.book_new();
+XLSX.utils.book_append_sheet(wb, ws, 'Plan de Corte');
+XLSX.writeFile(wb, `plan_corte_${new Date().toISOString().slice(0,10)}.xlsx`);
 }
 
 function exportarColmenasDisponibles() {
-    const encabezado = ['Código', 'Medida (cm)', 'Estado', 'Fecha'];
-    const filas = SistemaInventario.colmenasHistorico.map(c => [
-        c.cod || c.n_colmena || '-',
-        c.medida_cm || 0,
-        c.estado || 'disponible',
-        formatearFecha(c.fecha_registro || c.fecha || new Date().toISOString())
-    ]);
-    const wb = XLSX.utils.book_new();
+    const encabezado = ['N° Colmena (Ubicación)', 'Código', 'Medida (cm)', 'Estado', 'Fecha Registro'];
+    const filas = SistemaInventario.colmenasHistorico
+        .filter(c => c.estado === 'disponible')
+        .map(c => [
+            c.n_colmena || '-',
+            c.cod || '-',
+            c.medida_cm || 0,
+            c.estado,
+            formatearFecha(c.fecha || new Date())
+        ]);
     const ws = XLSX.utils.aoa_to_sheet([encabezado, ...filas]);
+    const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "UBICACION_COLMENAS");
     XLSX.writeFile(wb, `colmenas_disponibles_${new Date().toISOString().slice(0,10)}.xlsx`);
 }
