@@ -21,23 +21,15 @@ let serialesDisponibles = [];    // Seriales disponibles cargados desde Firebase
 
 function formatearFecha(fecha) {
     if (!fecha || fecha === '-' || fecha === 'undefined' || fecha === null) return '-';
-
-    // Si es el número serie de Excel (ej: 46083)
+    // Si es número serie de Excel (46083 -> 04/03/2026)
     if (typeof fecha === 'number' && fecha > 40000) {
         const dExcel = new Date((fecha - 25569) * 86400 * 1000);
-        const dia = String(dExcel.getDate()).padStart(2, '0');
-        const mes = String(dExcel.getMonth() + 1).padStart(2, '0');
-        const ano = dExcel.getFullYear();
-        return `${dia}/${mes}/${ano}`;
+        return `${String(dExcel.getDate()).padStart(2,'0')}/${String(dExcel.getMonth()+1).padStart(2,'0')}/${dExcel.getFullYear()}`;
     }
-    try {
-        const d = new Date(fecha);
-        if (isNaN(d.getTime())) return (typeof fecha === 'string' && fecha.includes('/')) ? fecha : '-';
-        const dia = String(d.getDate()).padStart(2, '0');
-        const mes = String(d.getMonth() + 1).padStart(2, '0');
-        const ano = d.getFullYear();
-        return `${dia}/${mes}/${ano}`;
-    } catch(e) { return '-'; }
+    // Si es string o Date objeto
+    const d = new Date(fecha);
+    if (isNaN(d.getTime())) return String(fecha).includes('/') ? fecha : '-';
+    return `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}/${d.getFullYear()}`;
 }
 // Verificar sesión activa
 document.addEventListener("DOMContentLoaded", () => {
@@ -418,28 +410,21 @@ async function cargarEstructuraInventario(event) {
             const paquete = fila[colPaquete];
             const serial = fila[colSerial];
             
-            // Verificar que los datos no estén vacíos
-            if (!fecha || !codigo || !lote || !paquete || !serial) continue;
-            
-            // Normalizar los datos
-            const fechaStr = typeof fecha === 'string' ? fecha.trim() : 
-                             fecha instanceof Date ? fecha.toISOString().split('T')[0] : 
-                             String(fecha).trim();
-            
-            const codigoStr = String(codigo).trim().toUpperCase();
-            const loteStr = String(lote).trim();
-            const paqueteStr = String(paquete).trim();
-            const serialStr = String(serial).trim();
-            
-            // Agregar a la lista de seriales
+            const fechaLimpia = formatearFecha(fila[colFecha]);
+            const codigoStr = String(fila[colCodigo] || '').trim().toUpperCase();
+            const loteStr = String(fila[colLote] || '').trim() || '-';
+            const paqueteStr = String(fila[colPaquete] || '').trim() || '-';
+            const serialStr = String(fila[colSerial] || '').trim() || '-';
+            if (codigoStr) {
             SistemaInventario.seriales.push({
-                fecha: fechaStr,
-                codigo: codigoStr,
-                lote: loteStr,
-                paquete: paqueteStr,
-                serial: serialStr,
-                estado: 'disponible'
+            fecha: fechaLimpia,
+            codigo: codigoStr,
+            lote: loteStr,
+            paquete: paqueteStr,
+            serial: serialStr,
+            estado: 'disponible'
             });
+            }
         }
         
         // Ordenar los seriales por FECHA (más antigua primero), LOTE, PAQUETE, SERIAL
@@ -1307,46 +1292,15 @@ function formatearResultado(orden, resultado) {
 
 function actualizarTablaColmenasResultado() {
     const tbody = document.getElementById('tbodyColmenasResultado');
-    if (!tbody) {
-        console.warn("⚠️ No se encontró el elemento 'tbodyColmenasResultado' en el HTML.");
-        return; // Evita el error TypeError
-    }
-    if (SistemaInventario.colmenasHistorico.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="6">Sin datos</td></tr>';
-        return;
-    }
-    const colmenasOrdenadas = [...SistemaInventario.colmenasHistorico].sort((a, b) => {
-        const cmpColmena = ordenarColmena(a.n_colmena, b.n_colmena);
-        if (cmpColmena !== 0) return cmpColmena;
-        return String(a.cod || '').localeCompare(String(b.cod || ''));
-    });
-    tbody.innerHTML = colmenasOrdenadas.map(c => {
-        let estadoBadge = '';
-        const esReemplazo = c.codigo_original && c.cod && normalizarCodigo(c.cod) !== normalizarCodigo(c.codigo_original);
-        const esLeftover = c.n_colmena && c.n_colmena.includes('-S');
-        
-        switch(c.estado) {
-            case 'usada': 
-                estadoBadge = esReemplazo 
-                    ? '<span style="background-color: #3498db; color: white; padding: 2px 6px; border-radius: 3px; font-size: 10px;">REEMPLAZO</span>' 
-                    : '<span style="background-color: #27ae60; color: white; padding: 2px 6px; border-radius: 3px; font-size: 10px;">USADA</span>'; 
-                break;
-            case 'disponible': 
-                estadoBadge = esReemplazo 
-                    ? '<span style="background-color: #3498db; color: white; padding: 2px 6px; border-radius: 3px; font-size: 10px;">REEMPLAZO</span>' 
-                    : '<span style="background-color: #3498db; color: white; padding: 2px 6px; border-radius: 3px; font-size: 10px;">DISPONIBLE</span>'; 
-                break;
-            case 'nueva': estadoBadge = '<span style="background-color: #f39c12; color: white; padding: 2px 6px; border-radius: 3px; font-size: 10px;">NUEVA</span>'; break;
-            case 'merma': estadoBadge = '<span style="background-color: #e67e22; color: white; padding: 2px 6px; border-radius: 3px; font-size: 10px;">MERMA</span>'; break;
-            default: estadoBadge = c.estado || '';
-        }
-        
-        let agrupacionBadge = '';
-        if (esLeftover) {
-            agrupacionBadge = '<span style="background-color: #9b59b6; color: white; padding: 1px 4px; border-radius: 2px; font-size: 9px; margin-left: 4px;">SOBRANTE</span>';
-        }
-        
-        return `<tr${esLeftover ? ' style="background-color: #f8f9fa;"' : ''}><td>${c.n_colmena}</td><td>${c.cod}${agrupacionBadge}</td><td>${c.codigo_original || ''}</td><td>${formatearValor(c.medida_cm)}</td><td>${estadoBadge}</td><td>${c.origen}</td></tr>`;
+    if (!tbody) return;
+    tbody.innerHTML = SistemaInventario.resultadosOptimizacion.map(item => {
+        const r = item.resultado;
+        return `<tr>
+            <td>${r.colmena || 'TUBO NUEVO'}</td>
+            <td>${r.codigo || '-'}</td>
+            <td>${r.medida_cm} cm</td>
+            <td><span class="tag-accion">CORTAR</span></td>
+        </tr>`;
     }).join('');
 }
 
@@ -1688,7 +1642,15 @@ function ejecutarOptimizacion() {
         const tuboEncontrado = buscarTubosParaOrden(codOrden, orden.medida_mm, codOrden);
         
         if (tuboEncontrado && tuboEncontrado.sobrante_mm === 0) {
-            resultado = { orden: orden.id, medida_cm: orden.medida_cm, fuente: 'exacta', colmena: tuboEncontrado.colmena.n_colmena, codigo: tuboEncontrado.colmena.cod, sobrante_cm: 0 };
+            resultado = { 
+                orden: orden.id, 
+                medida_cm: orden.medida_cm, 
+                fuente: 'exacta', 
+                colmena: tuboEncontrado.colmena.n_colmena, 
+                codigo: tuboEncontrado.colmena.cod, 
+                sobrante_cm: 0,
+                serial: tuboEncontrado.colmena.serial || orden.serial || null
+            };
             const idxHistorico = SistemaInventario.colmenasHistorico.findIndex(c => c.n_colmena === tuboEncontrado.colmena.n_colmena);
             if (idxHistorico !== -1) { SistemaInventario.colmenasHistorico[idxHistorico].estado = 'usada'; SistemaInventario.colmenasHistorico[idxHistorico].origen = 'Orden ' + orden.id; }
             SistemaInventario.colmenasDisponibles.splice(tuboEncontrado.indice, 1);
@@ -1968,23 +1930,23 @@ function ejecutarOptimizacion() {
 function exportarResultados() {
     if (SistemaInventario.resultadosOptimizacion.length === 0) return alert('No hay resultados');
     const datosExcel = [['OT', 'Ubicación', 'Acción', 'Colmena', 'Código', 'Medida (cm)', 'Lote', 'Paquete', 'Serial', 'Fecha Serial']];
-SistemaInventario.resultadosOptimizacion.forEach(item => {
-    const res = item.resultado;
-    const ord = SistemaInventario.ordenes.find(o => o.id === res.orden) || {};
-    
-    // Recuperar serial si existe en la orden o en el resultado
-    const s = res.serial || ord.serial || {};
-    const fechaFormateada = s.fecha ? formatearFecha(s.fecha) : '-';
-    datosExcel.push([
-        ord.ot || '-', ord.ubic || '-', 'CORTAR', 
-        res.colmena || 'TUBO NUEVO', res.codigo || '-', res.medida_cm,
-        s.lote || '-', s.paquete || '-', s.serial || '-', fechaFormateada
-    ]);
-});
-const ws = XLSX.utils.aoa_to_sheet(datosExcel);
-const wb = XLSX.utils.book_new();
-XLSX.utils.book_append_sheet(wb, ws, 'Plan de Corte');
-XLSX.writeFile(wb, `plan_corte_${new Date().toISOString().slice(0,10)}.xlsx`);
+    SistemaInventario.resultadosOptimizacion.forEach(item => {
+        const res = item.resultado;
+        const ord = SistemaInventario.ordenes.find(o => o.id === res.orden) || {};
+        
+        // Recuperar serial si existe en la orden o en el resultado
+        const s = res.serial || ord.serial || {};
+        const fechaFormateada = s.fecha ? formatearFecha(s.fecha) : '-';
+        datosExcel.push([
+            ord.ot || '-', ord.ubic || '-', 'CORTAR', 
+            res.colmena || 'TUBO NUEVO', res.codigo || '-', res.medida_cm,
+            s.lote || '-', s.paquete || '-', s.serial || '-', fechaFormateada
+        ]);
+    });
+    const ws = XLSX.utils.aoa_to_sheet(datosExcel);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Plan de Corte');
+    XLSX.writeFile(wb, `plan_corte_${new Date().toISOString().slice(0,10)}.xlsx`);
 }
 
 function exportarColmenasDisponibles() {
