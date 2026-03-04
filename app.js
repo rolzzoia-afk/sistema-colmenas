@@ -422,7 +422,7 @@ async function cargarEstructuraInventario(event) {
                         codigo: codigoStr,
                         lote: loteStr,
                         paquete: paqueteStr,
-                        serial: cantidadStr, // Mantenemos el dato original por compatibilidad de reportes
+                        serial: (t + 1).toString(), // Numeración secuencial: tubo 1, 2, ... N dentro del paquete
                         estado: 'disponible'
                     });
                 }
