@@ -2050,7 +2050,7 @@ function exportarInventarioActualizado() {
         return;
     }
 
-    // Cabeceras exactas para que el CSV sirva para volver a subirse al sistema
+    // Preparar las filas con sus cabeceras
     const filas = [['Fecha', 'Código', 'Lote', 'Paquete', 'Serial', 'Estado']];
     disponibles.forEach(s => {
         filas.push([
@@ -2063,16 +2063,25 @@ function exportarInventarioActualizado() {
         ]);
     });
 
-    const csvContent = "\uFEFF" + filas.map(e => e.join(",")).join("\n");
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const link = document.createElement("a");
-    const url = URL.createObjectURL(blob);
-    link.setAttribute("href", url);
-    link.setAttribute("download", `inventario_actualizado_${new Date().toISOString().split('T')[0]}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
+    // Crear el libro y la hoja usando SheetJS (XLSX)
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.aoa_to_sheet(filas);
+
+    // Ajustar el ancho de las columnas para que se vea ordenado
+    ws['!cols'] = [
+        { wch: 15 }, // Fecha
+        { wch: 12 }, // Código
+        { wch: 10 }, // Lote
+        { wch: 10 }, // Paquete
+        { wch: 10 }, // Serial
+        { wch: 15 }  // Estado
+    ];
+
+    XLSX.utils.book_append_sheet(wb, ws, "Inventario Actual");
+
+    // Exportar el archivo como .xlsx real
+    const nombreArchivo = `inventario_actualizado_${new Date().toISOString().split('T')[0]}.xlsx`;
+    XLSX.writeFile(wb, nombreArchivo);
 
     log(`📥 Inventario actualizado exportado: ${disponibles.length} seriales disponibles`, 'success');
 }
