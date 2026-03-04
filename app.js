@@ -1352,6 +1352,10 @@ function actualizarTablaColmenasResultado() {
 
 function actualizarTablaMermas() {
     const tbody = document.getElementById('tbodyMermas');
+    if (!tbody) {
+        console.warn("⚠️ No se encontró el elemento 'tbodyMermas' en el HTML.");
+        return;
+    }
     if (SistemaInventario.mermas.length === 0) {
         tbody.innerHTML = '<tr><td colspan="7">Sin mermas</td></tr>';
         return;
