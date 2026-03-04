@@ -21,16 +21,22 @@ let serialesDisponibles = [];    // Seriales disponibles cargados desde Firebase
 
 function formatearFecha(fecha) {
     if (!fecha || fecha === '-' || fecha === 'undefined' || fecha === null) return '-';
+
+    // Si es el número serie de Excel (ej: 46083)
     if (typeof fecha === 'number' && fecha > 40000) {
-        try {
-            const dExcel = new Date((fecha - 25569) * 86400 * 1000);
-            return `${String(dExcel.getDate()).padStart(2,'0')}/${String(dExcel.getMonth()+1).padStart(2,'0')}/${dExcel.getFullYear()}`;
-        } catch(e) { return '-'; }
+        const dExcel = new Date((fecha - 25569) * 86400 * 1000);
+        const dia = String(dExcel.getDate()).padStart(2, '0');
+        const mes = String(dExcel.getMonth() + 1).padStart(2, '0');
+        const ano = dExcel.getFullYear();
+        return `${dia}/${mes}/${ano}`;
     }
     try {
         const d = new Date(fecha);
         if (isNaN(d.getTime())) return (typeof fecha === 'string' && fecha.includes('/')) ? fecha : '-';
-        return `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}/${d.getFullYear()}`;
+        const dia = String(d.getDate()).padStart(2, '0');
+        const mes = String(d.getMonth() + 1).padStart(2, '0');
+        const ano = d.getFullYear();
+        return `${dia}/${mes}/${ano}`;
     } catch(e) { return '-'; }
 }
 // Verificar sesión activa
@@ -1301,6 +1307,10 @@ function formatearResultado(orden, resultado) {
 
 function actualizarTablaColmenasResultado() {
     const tbody = document.getElementById('tbodyColmenasResultado');
+    if (!tbody) {
+        console.warn("⚠️ No se encontró el elemento 'tbodyColmenasResultado' en el HTML.");
+        return; // Evita el error TypeError
+    }
     if (SistemaInventario.colmenasHistorico.length === 0) {
         tbody.innerHTML = '<tr><td colspan="6">Sin datos</td></tr>';
         return;
