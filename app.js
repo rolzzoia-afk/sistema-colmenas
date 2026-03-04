@@ -413,14 +413,19 @@ async function cargarEstructuraInventario(event) {
             const serialStr = String(fila[colSerial] || '').trim() || '-';
             
             if (codigoStr) {
-                SistemaInventario.seriales.push({
-                    fecha: fechaLimpia,
-                    codigo: codigoStr,
-                    lote: loteStr,
-                    paquete: paqueteStr,
-                    serial: serialStr,
-                    estado: 'disponible'
-                });
+                // "Serial" en el archivo es la CANTIDAD de tubos en ese paquete
+                const cantidadStr = String(fila[colSerial] || '1').trim();
+                const cantidadTubos = parseInt(cantidadStr, 10) || 1;
+                for (let t = 0; t < cantidadTubos; t++) {
+                    SistemaInventario.seriales.push({
+                        fecha: fechaLimpia,
+                        codigo: codigoStr,
+                        lote: loteStr,
+                        paquete: paqueteStr,
+                        serial: cantidadStr, // Mantenemos el dato original por compatibilidad de reportes
+                        estado: 'disponible'
+                    });
+                }
             }
         }
         
@@ -2052,14 +2057,25 @@ function exportarInventarioActualizado() {
 
     // Preparar las filas con sus cabeceras
     const filas = [['Fecha', 'Código', 'Lote', 'Paquete', 'Serial', 'Estado']];
+
+    // Agrupar por Fecha+Código+Lote+Paquete y contar cuántos tubos quedan disponibles
+    const agrupado = {};
     disponibles.forEach(s => {
+        const key = `${s.fecha}|${s.codigo}|${s.lote}|${s.paquete}`;
+        if (!agrupado[key]) {
+            agrupado[key] = { ...s, cantidadRestante: 0 };
+        }
+        agrupado[key].cantidadRestante++;
+    });
+
+    Object.values(agrupado).forEach(g => {
         filas.push([
-            s.fecha || '-',
-            s.codigo || '-',
-            s.lote || '-',
-            s.paquete || '-',
-            s.serial || '-',
-            s.estado
+            g.fecha || '-',
+            g.codigo || '-',
+            g.lote || '-',
+            g.paquete || '-',
+            g.cantidadRestante.toString(), // Cantidad restante de tubos en ese paquete
+            'disponible'
         ]);
     });
 
