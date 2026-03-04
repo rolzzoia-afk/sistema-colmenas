@@ -301,13 +301,15 @@ async function guardarColmenaFinalEnFirestore() {
         const db = window.firebaseDb;
 
         // Extraer colmenas disponibles del histórico y mapear al formato simple
+        // IMPORTANTE: incluir serial para preservar la trazabilidad en optimizaciones sucesivas
         const colmenasFinal = SistemaInventario.colmenasHistorico
             .filter(c => c.estado === 'disponible')
             .map(c => ({
                 n_colmena: c.n_colmena,
                 medida_mm: c.medida_mm,
                 medida_cm: c.medida_cm,
-                cod: c.cod
+                cod: c.cod,
+                serial: c.serial || null
             }));
 
         const datos = {
@@ -1674,7 +1676,8 @@ function ejecutarOptimizacion() {
     SistemaInventario.mermas = [];
 
     colmenasAUsar.forEach((col) => {
-        SistemaInventario.colmenasHistorico.push({ n_colmena: col.n_colmena, medida_cm: col.medida_cm, medida_mm: col.medida_mm, cod: col.cod, codigo_original: col.cod, estado: 'disponible', origen: 'Original', posicionOriginal: col.n_colmena });
+        // Incluir serial para que los sobrantes hereden la trazabilidad del tubo original
+        SistemaInventario.colmenasHistorico.push({ n_colmena: col.n_colmena, medida_cm: col.medida_cm, medida_mm: col.medida_mm, cod: col.cod, codigo_original: col.cod, estado: 'disponible', origen: 'Original', posicionOriginal: col.n_colmena, serial: col.serial || null });
     });
 
     log('=== INICIO OPTIMIZACIÓN ===', 'info');
