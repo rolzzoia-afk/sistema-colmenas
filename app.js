@@ -404,26 +404,22 @@ async function cargarEstructuraInventario(event) {
             const fila = datos[i];
             if (!fila) continue;
             
-            const fecha = fila[colFecha];
-            const codigo = fila[colCodigo];
-            const lote = fila[colLote];
-            const paquete = fila[colPaquete];
-            const serial = fila[colSerial];
-            
+            // Asegurarse de que los campos lote, paquete y serial se capturen siempre como strings limpios
             const fechaLimpia = formatearFecha(fila[colFecha]);
             const codigoStr = String(fila[colCodigo] || '').trim().toUpperCase();
             const loteStr = String(fila[colLote] || '').trim() || '-';
             const paqueteStr = String(fila[colPaquete] || '').trim() || '-';
             const serialStr = String(fila[colSerial] || '').trim() || '-';
+            
             if (codigoStr) {
-            SistemaInventario.seriales.push({
-            fecha: fechaLimpia,
-            codigo: codigoStr,
-            lote: loteStr,
-            paquete: paqueteStr,
-            serial: serialStr,
-            estado: 'disponible'
-            });
+                SistemaInventario.seriales.push({
+                    fecha: fechaLimpia,
+                    codigo: codigoStr,
+                    lote: loteStr,
+                    paquete: paqueteStr,
+                    serial: serialStr,
+                    estado: 'disponible'
+                });
             }
         }
         
@@ -1689,13 +1685,24 @@ function ejecutarOptimizacion() {
                 
                 const idxInsertar = SistemaInventario.colmenasHistorico.findIndex(c => c.n_colmena === tuboEncontrado.colmena.n_colmena);
                 if (idxInsertar !== -1) {
-                    SistemaInventario.colmenasHistorico.splice(idxInsertar + 1, 0, { n_colmena: tuboEncontrado.colmena.n_colmena, medida_cm: sobrante / 10, medida_mm: sobrante, cod: tuboEncontrado.colmena.cod, codigo_original: tuboEncontrado.colmena.cod, estado: 'disponible', origen: 'Sobrante orden ' + orden.id, posicionOriginal: tuboEncontrado.colmena.n_colmena });
+                    SistemaInventario.colmenasHistorico.splice(idxInsertar + 1, 0, { 
+                        n_colmena: tuboEncontrado.colmena.n_colmena, 
+                        medida_cm: sobrante / 10, 
+                        medida_mm: sobrante, 
+                        cod: tuboEncontrado.colmena.cod, 
+                        codigo_original: tuboEncontrado.colmena.cod, 
+                        estado: 'disponible', 
+                        origen: 'Sobrante orden ' + orden.id, 
+                        posicionOriginal: tuboEncontrado.colmena.n_colmena,
+                        serial: tuboEncontrado.colmena.serial || orden.serial || null
+                    });
                 }
                 SistemaInventario.colmenasDisponibles.push({
                     n_colmena: tuboEncontrado.colmena.n_colmena,
                     medida_mm: sobrante,
                     medida_cm: sobrante / 10,
-                    cod: tuboEncontrado.colmena.cod
+                    cod: tuboEncontrado.colmena.cod,
+                    serial: tuboEncontrado.colmena.serial || orden.serial || null
                 });
                 SistemaInventario.colmenasDisponibles.splice(tuboEncontrado.indice, 1);
             }
@@ -1930,6 +1937,7 @@ function ejecutarOptimizacion() {
 function exportarResultados() {
     if (SistemaInventario.resultadosOptimizacion.length === 0) return alert('No hay resultados');
     const datosExcel = [['OT', 'Ubicación', 'Acción', 'Colmena', 'Código', 'Medida (cm)', 'Lote', 'Paquete', 'Serial', 'Fecha Serial']];
+    
     SistemaInventario.resultadosOptimizacion.forEach(item => {
         const res = item.resultado;
         const ord = SistemaInventario.ordenes.find(o => o.id === res.orden) || {};
@@ -1937,12 +1945,38 @@ function exportarResultados() {
         // Recuperar serial si existe en la orden o en el resultado
         const s = res.serial || ord.serial || {};
         const fechaFormateada = s.fecha ? formatearFecha(s.fecha) : '-';
+        
+        // Fila CORTAR
         datosExcel.push([
-            ord.ot || '-', ord.ubic || '-', 'CORTAR', 
-            res.colmena || 'TUBO NUEVO', res.codigo || '-', res.medida_cm,
-            s.lote || '-', s.paquete || '-', s.serial || '-', fechaFormateada
+            ord.ot || '-', 
+            ord.ubic || '-', 
+            'CORTAR', 
+            res.colmena || 'TUBO NUEVO', 
+            res.codigo || ord.cod || '-', 
+            res.medida_cm,
+            s.lote || '-', 
+            s.paquete || '-', 
+            s.serial || '-', 
+            fechaFormateada
         ]);
+        
+        // Si existe un sobrante (> 0), insertar una fila de "GUARDAR SOBRANTE" inmediatamente después
+        if (res.sobrante_cm > 0) {
+            datosExcel.push([
+                ord.ot || '-', 
+                ord.ubic || '-', 
+                'GUARDAR SOBRANTE', 
+                res.colmena || 'TUBO NUEVO', 
+                res.codigo || ord.cod || '-', 
+                res.sobrante_cm,
+                s.lote || '-', 
+                s.paquete || '-', 
+                s.serial || '-', 
+                fechaFormateada
+            ]);
+        }
     });
+    
     const ws = XLSX.utils.aoa_to_sheet(datosExcel);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Plan de Corte');
@@ -1950,16 +1984,23 @@ function exportarResultados() {
 }
 
 function exportarColmenasDisponibles() {
-    const encabezado = ['N° Colmena (Ubicación)', 'Código', 'Medida (cm)', 'Estado', 'Fecha Registro'];
+    const encabezado = ['N° Colmena (Ubicación)', 'Código', 'Medida (cm)', 'Estado', 'Fecha Registro', 'Lote', 'Paquete', 'Serial'];
     const filas = SistemaInventario.colmenasHistorico
         .filter(c => c.estado === 'disponible')
-        .map(c => [
-            c.n_colmena || '-',
-            c.cod || '-',
-            c.medida_cm || 0,
-            c.estado,
-            formatearFecha(c.fecha || new Date())
-        ]);
+        .map(c => {
+            // Recuperar información del serial si existe
+            const s = c.serial || {};
+            return [
+                c.n_colmena || '-',
+                c.cod || '-',
+                c.medida_cm || 0,
+                c.estado,
+                formatearFecha(c.fecha || new Date()),
+                s.lote || '-',
+                s.paquete || '-',
+                s.serial || '-'
+            ];
+        });
     const ws = XLSX.utils.aoa_to_sheet([encabezado, ...filas]);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "UBICACION_COLMENAS");
