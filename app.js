@@ -1958,7 +1958,7 @@ function exportarResultados() {
             ord.ot || '-', 
             ord.ubic || '-', 
             'CORTAR', 
-            res.colmena || 'TUBO NUEVO', 
+            res.fuente === 'tubo_nuevo' ? 'TUBO NUEVO' : (res.colmena || '-'), 
             res.codigo || ord.cod || '-', 
             res.medida_cm,
             s.lote || '-', 
