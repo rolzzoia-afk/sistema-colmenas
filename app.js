@@ -1,5 +1,6 @@
 const MM_TUBO_ORIGINAL = 5780;
 const MM_KERF = 3;
+const STOCK_MINIMO = 10; // Umbral de alerta: códigos con ≤ este número de tubos enteros disponibles
 
 const SistemaInventario = {
     ordenes: [],
@@ -465,6 +466,9 @@ async function cargarEstructuraInventario(event) {
         // Actualizar la tabla de seriales
         actualizarTablaSeriales();
         
+        // Verificar alertas de stock tras cargar el inventario
+        verificarAlertasStock();
+        
         // Actualizar el estado en la UI
         document.getElementById('estadoEstructura').textContent = `✓ ${SistemaInventario.seriales.length} seriales`;
         document.getElementById('estadoEstructura').className = 'estado-archivo estado-ok';
@@ -656,8 +660,9 @@ async function cargarSerialesDesdeFirestore() {
                 
                 console.log(`✅ ${SistemaInventario.seriales.length} seriales cargados desde Firestore`);
                 
-                // Actualizar la tabla y el estado
+                // Actualizar la tabla, el estado y las alertas de stock
                 actualizarTablaSeriales();
+                verificarAlertasStock();
                 const estadoEl = document.getElementById('estadoEstructura');
                 if (estadoEl) {
                     estadoEl.textContent = `✓ ${SistemaInventario.seriales.length} seriales (sincronizados)`;
@@ -1300,6 +1305,50 @@ function actualizarTablaColmenasResultado() {
     }).join('');
 }
 
+function verificarAlertasStock() {
+    const conteo = {};
+    // Contar solo los tubos enteros disponibles por código
+    SistemaInventario.seriales.forEach(s => {
+        if (s.estado === 'disponible') {
+            conteo[s.codigo] = (conteo[s.codigo] || 0) + 1;
+        }
+    });
+
+    // Filtrar los que están en peligro (≤ STOCK_MINIMO)
+    const alertas = Object.keys(conteo)
+        .filter(cod => conteo[cod] <= STOCK_MINIMO)
+        .map(cod => ({ codigo: cod, cantidad: conteo[cod] }))
+        .sort((a, b) => a.cantidad - b.cantidad); // Más críticos primero
+
+    renderizarAlertasStock(alertas);
+}
+
+function renderizarAlertasStock(alertas) {
+    const panel = document.getElementById('panelAlertasStock');
+    if (!panel) return;
+
+    if (alertas.length === 0) {
+        panel.innerHTML = '';
+        panel.style.display = 'none';
+        return;
+    }
+
+    const items = alertas.map(a => {
+        const esCritico = a.cantidad <= 3;
+        const bgColor = esCritico ? '#e74c3c' : '#f39c12';
+        const icon = esCritico ? '🔴' : '🟡';
+        return `<span style="display:inline-block; background:${bgColor}; color:white; padding:4px 10px; border-radius:4px; margin:3px 2px; font-size:12px; font-weight:bold;">${icon} ${a.codigo}: ${a.cantidad} tubo${a.cantidad !== 1 ? 's' : ''}</span>`;
+    }).join('');
+
+    panel.style.display = 'block';
+    panel.innerHTML = `
+        <div style="background:#fff3cd; border:1px solid #ffc107; border-left:4px solid #f39c12; border-radius:6px; padding:12px 16px; margin:10px 0;">
+            <strong style="color:#856404; font-size:13px;">⚠️ ALERTA DE STOCK MÍNIMO — Materiales con ≤${STOCK_MINIMO} tubos disponibles:</strong>
+            <div style="margin-top:8px; line-height:2;">${items}</div>
+        </div>
+    `;
+}
+
 function actualizarTablaMermas() {
     const tbody = document.getElementById('tbodyMermas');
     if (!tbody) {
@@ -1939,6 +1988,9 @@ function ejecutarOptimizacion() {
     // Guardar colmena final en Firebase para que sea la base del día siguiente
     log('💾 Guardando colmena final en Firebase...', 'info');
     guardarColmenaFinalEnFirestore();
+
+    // Actualizar alertas de stock en tiempo real tras consumir tubos
+    verificarAlertasStock();
 }
 
 function exportarResultados() {
