@@ -2042,6 +2042,41 @@ function exportarResultados() {
     XLSX.writeFile(wb, `plan_corte_${new Date().toISOString().slice(0,10)}.xlsx`);
 }
 
+function exportarInventarioActualizado() {
+    const disponibles = SistemaInventario.seriales.filter(s => s.estado === 'disponible');
+
+    if (disponibles.length === 0) {
+        alert("No hay inventario disponible para exportar.");
+        return;
+    }
+
+    // Cabeceras exactas para que el CSV sirva para volver a subirse al sistema
+    const filas = [['Fecha', 'Código', 'Lote', 'Paquete', 'Serial', 'Estado']];
+    disponibles.forEach(s => {
+        filas.push([
+            s.fecha || '-',
+            s.codigo || '-',
+            s.lote || '-',
+            s.paquete || '-',
+            s.serial || '-',
+            s.estado
+        ]);
+    });
+
+    const csvContent = "\uFEFF" + filas.map(e => e.join(",")).join("\n");
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement("a");
+    const url = URL.createObjectURL(blob);
+    link.setAttribute("href", url);
+    link.setAttribute("download", `inventario_actualizado_${new Date().toISOString().split('T')[0]}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+
+    log(`📥 Inventario actualizado exportado: ${disponibles.length} seriales disponibles`, 'success');
+}
+
 function exportarColmenasDisponibles() {
     const encabezado = ['N° Colmena (Ubicación)', 'Código', 'Medida (cm)', 'Estado', 'Fecha Registro', 'Lote', 'Paquete', 'Serial'];
     const filas = SistemaInventario.colmenasHistorico
