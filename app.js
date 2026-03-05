@@ -1,3 +1,12 @@
+// Función para limpiar números y manejar tanto comas como puntos decimales
+function limpiarNumero(valor) {
+    if (valor === null || valor === undefined) return 0;
+    // Convertir a string, reemplazar coma por punto y quitar espacios
+    let str = String(valor).replace(',', '.').trim();
+    let num = parseFloat(str);
+    return isNaN(num) ? 0 : num;
+}
+
 const MM_TUBO_ORIGINAL = 5780;
 const MM_KERF = 3;
 const STOCK_MINIMO = 10; // Umbral de alerta: códigos con ≤ este número de tubos enteros disponibles
@@ -846,23 +855,17 @@ function leerExcelCompleto(file) {
 
 function formatearNumero(valor) {
     if (valor === null || valor === undefined || valor === '') return null;
-    if (typeof valor === 'number') return Math.round(valor * 100) / 100;
-    if (typeof valor === 'string') {
-        const num = parseFloat(valor.replace(',', '.'));
-        return isNaN(num) ? null : Math.round(num * 100) / 100;
-    }
-    return null;
+    // Usar limpiarNumero para manejar tanto comas como puntos
+    const num = limpiarNumero(valor);
+    return num === 0 ? null : Math.round(num * 100) / 100;
 }
 
-  function parsearNumero(valor) {
-      if (valor === null || valor === undefined || valor === '') return null;
-      if (typeof valor === 'number') return valor;
-      if (typeof valor === 'string') {
-          const num = parseFloat(valor.replace(',', '.'));
-          return isNaN(num) ? null : num;
-      }
-      return null;
-  }
+function parsearNumero(valor) {
+    if (valor === null || valor === undefined || valor === '') return null;
+    // Usar limpiarNumero para manejar tanto comas como puntos
+    const num = limpiarNumero(valor);
+    return num === 0 ? null : num;
+}
 
   // Función para validar y limpiar datos de órdenes o colmenas
   function validarYLimpiarDatos(datos, tipo) {
@@ -893,14 +896,10 @@ function formatearNumero(valor) {
                   continue;
               }
 
-              // Convertir Medida a número (float)
+              // Convertir Medida a número (float) usando limpiarNumero
               let medidaNum = null;
               if (medidaRaw !== null && medidaRaw !== undefined && medidaRaw !== '') {
-                  if (typeof medidaRaw === 'number') {
-                      medidaNum = parseFloat(medidaRaw);
-                  } else if (typeof medidaRaw === 'string') {
-                      medidaNum = parseFloat(String(medidaRaw).replace(',', '.'));
-                  }
+                  medidaNum = limpiarNumero(medidaRaw);
               }
 
               if (medidaNum === null || isNaN(medidaNum) || medidaNum <= 0) {
@@ -947,14 +946,10 @@ function formatearNumero(valor) {
                   continue;
               }
 
-              // Convertir Medida (cm) a número
+              // Convertir Medida (cm) a número usando limpiarNumero
               let medidaNum = null;
               if (medidaRaw !== null && medidaRaw !== undefined && medidaRaw !== '') {
-                  if (typeof medidaRaw === 'number') {
-                      medidaNum = parseFloat(medidaRaw);
-                  } else if (typeof medidaRaw === 'string') {
-                      medidaNum = parseFloat(String(medidaRaw).replace(',', '.'));
-                  }
+                  medidaNum = limpiarNumero(medidaRaw);
               }
 
               if (medidaNum === null || isNaN(medidaNum) || medidaNum <= 0) {
@@ -1067,7 +1062,8 @@ async function cargarOrdenes(event) {
             if (!fila) continue;
             const colMedida = mapeoColumnas['medida'];
             const valor = colMedida !== undefined ? fila[colMedida] : null;
-            const medidaNum = parsearNumero(valor);
+            // Usar limpiarNumero para manejar tanto comas como puntos
+            const medidaNum = limpiarNumero(valor);
             if (medidaNum !== null && medidaNum > 0) {
                 const orden = { id: SistemaInventario.ordenes.length + 1, medida_mm: Math.round(medidaNum * 10), medida_cm: formatearNumero(medidaNum) };
                 for (const [nombre, config] of Object.entries(COLUMNAS_ESPECIALES)) {
@@ -1121,7 +1117,8 @@ async function cargarColmenas(event) {
             const fila = datos[i];
             if (!fila) continue;
             const medida = fila[columnaMedida];
-            const medidaNum = parsearNumero(medida);
+            // Usar limpiarNumero para manejar tanto comas como puntos
+            const medidaNum = limpiarNumero(medida);
             if (medidaNum !== null && medidaNum > 0) {
                 const cod = fila[columnaCod];
                 let nColmena;
