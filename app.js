@@ -279,10 +279,15 @@ async function cargarColmenaFinalDesdeFirestore() {
                     if (docSnap.exists() && !docSnap.metadata.hasPendingWrites) {
                         const data = docSnap.data();
                         if (data && data.data) {
-                            SistemaInventario.colmenasActuales = JSON.parse(data.data) || [];
-                            // Actualizar la tabla en pantalla
+                            // Actualizar colmenaActual y SistemaInventario.colmenas con los datos frescos
+                            colmenaActual = JSON.parse(data.data) || [];
+                            SistemaInventario.colmenas = colmenaActual;
+                            
+                            // IMPORTANTE: Actualizar la tabla visual con los nuevos datos
                             actualizarTablaColmenas();
+                            
                             console.log("🔄 Datos frescos recibidos desde el servidor");
+                            console.log("🔄 Tabla de colmenas redibujada con datos frescos");
                         }
                     }
                 });
