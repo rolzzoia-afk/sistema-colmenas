@@ -262,7 +262,9 @@ async function cargarColmenaFinalDesdeFirestore() {
 
         const db = window.firebaseDb;
         const docRef = window.firebaseDoc(db, "usuarios", user.email, "colmena_final", "datos");
-        const docSnap = await window.firebaseGetDoc(docRef);
+        
+        // 🔄 CAMBIO 1: Forzar lectura desde el servidor con getDocFromServer
+        const docSnap = await window.firebaseGetDocFromServer(docRef);
 
         if (docSnap && docSnap.exists()) {
             const docData = docSnap.data();
@@ -271,6 +273,19 @@ async function cargarColmenaFinalDesdeFirestore() {
                 console.log(`✅ Colmena final cargada desde Firebase: ${colmenaActual.length} registros`);
                 actualizarIndicadorFuente(false);
                 verificarListo();
+                
+                // 🔄 CAMBIO 2: Implementar escucha activa con onSnapshot y metadatos
+                window.firebaseOnSnapshot(docRef, { includeMetadataChanges: false }, (docSnap) => {
+                    if (docSnap.exists() && !docSnap.metadata.hasPendingWrites) {
+                        const data = docSnap.data();
+                        if (data && data.data) {
+                            SistemaInventario.colmenasActuales = JSON.parse(data.data) || [];
+                            // Actualizar la tabla en pantalla
+                            actualizarTablaColmenas();
+                            console.log("🔄 Datos frescos recibidos desde el servidor");
+                        }
+                    }
+                });
             }
         } else {
             // Sin colmena_final guardada: usar SistemaInventario.colmenas como fallback
