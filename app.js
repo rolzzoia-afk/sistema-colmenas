@@ -1060,10 +1060,10 @@ async function cargarOrdenes(event) {
         const filaEncabezado = detectarFilaEncabezado(SistemaInventario.datosCrudosOrdenes);
         const encabezados = SistemaInventario.datosCrudosOrdenes[filaEncabezado];
         const mapeoColumnas = detectarColumnasExcel(encabezados);
-        // Fallback: si no hay columna 'medida' (ej. 'ANCHO REAL'), usar columna 'tubo' (ej. archivo AGASSI)
-        const colMedidaIdx = mapeoColumnas['medida'] !== undefined
-            ? mapeoColumnas['medida']
-            : mapeoColumnas['tubo'];
+        // Priorizar columna 'tubo' (AGASSI) sobre 'medida' (ANCHO REAL) como fuente de la medida a cortar
+        const colMedidaIdx = mapeoColumnas['tubo'] !== undefined
+            ? mapeoColumnas['tubo']
+            : mapeoColumnas['medida'];
 
         SistemaInventario.ordenes = [];
         for (let i = filaEncabezado + 1; i < SistemaInventario.datosCrudosOrdenes.length; i++) {
