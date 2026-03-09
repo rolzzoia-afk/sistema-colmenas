@@ -1213,19 +1213,16 @@ function formatearValor(valor) {
 
 function actualizarTablaOrdenes() {
     let columnasVisibles = detectarColumnasConDatos(SistemaInventario.ordenes);
-    const tenemosCatalogColor = Object.keys(SistemaInventario.catalogoColores).length > 0;
 
-    // Inyectar columna "Color" después de "Código" o "Tubería" cuando el catálogo tiene colores
-    if (tenemosCatalogColor && !columnasVisibles.some(c => c.key === '_colorCatalogo')) {
+    // Columna "Color" siempre presente después de "Código"/"Tubería"
+    // (vacía si el catálogo no está cargado; se rellena cuando sí lo está)
+    if (!columnasVisibles.some(c => c.key === '_colorCatalogo')) {
         const posInsertar = columnasVisibles.findIndex(
             c => c.key === 'codigoExtraido' || c.titulo === 'Código' || c.key === 'tuberia'
         );
         const colorCol = { key: '_colorCatalogo', titulo: 'Color', esNumero: false };
-        if (posInsertar !== -1) {
-            columnasVisibles.splice(posInsertar + 1, 0, colorCol);
-        } else {
-            columnasVisibles.push(colorCol);
-        }
+        if (posInsertar !== -1) columnasVisibles.splice(posInsertar + 1, 0, colorCol);
+        else columnasVisibles.push(colorCol);
     }
 
     const headerRow = document.getElementById('headerOrdenes');
@@ -1362,37 +1359,15 @@ function formatearResultado(orden, resultado) {
 function actualizarTablaColmenasResultado() {
     const tbody = document.getElementById('tbodyColmenasResultado');
     if (!tbody) return;
-    const tenemosCatalogColor = Object.keys(SistemaInventario.catalogoColores).length > 0;
-
-    // Inyectar <th>Color</th> en el thead si no existe aún
-    const tabla = tbody.closest('table');
-    if (tabla) {
-        const theadTr = tabla.querySelector('thead tr');
-        if (theadTr) {
-            const yaExiste = [...theadTr.querySelectorAll('th')].some(th => th.textContent.trim() === 'Color');
-            if (tenemosCatalogColor && !yaExiste) {
-                const thCodigo = [...theadTr.querySelectorAll('th')]
-                    .find(th => th.textContent.includes('Código'));
-                const colorTh = document.createElement('th');
-                colorTh.textContent = 'Color';
-                if (thCodigo) thCodigo.insertAdjacentElement('afterend', colorTh);
-                else theadTr.appendChild(colorTh);
-            } else if (!tenemosCatalogColor && yaExiste) {
-                [...theadTr.querySelectorAll('th')]
-                    .find(th => th.textContent.trim() === 'Color')?.remove();
-            }
-        }
-    }
-
+    // El <th>Color</th> ya existe en el HTML (columna 3, posición fija)
+    // TD siempre presente; vacío si el catálogo no está cargado
     tbody.innerHTML = SistemaInventario.resultadosOptimizacion.map(item => {
         const r = item.resultado;
-        const colorTd = tenemosCatalogColor
-            ? `<td>${r.color || obtenerColorDeCatalogo(r.codigo || r.codigo_original || '')}</td>`
-            : '';
+        const color = r.color || obtenerColorDeCatalogo(r.codigo || r.codigo_original || '');
         return `<tr>
             <td>${r.colmena || 'TUBO NUEVO'}</td>
             <td>${r.codigo || '-'}</td>
-            ${colorTd}
+            <td>${color}</td>
             <td>${r.medida_cm} cm</td>
             <td><span class="tag-accion">CORTAR</span></td>
         </tr>`;
