@@ -15,14 +15,15 @@ const SistemaInventario = {
     ordenes: [],
     colmenas: [],
     catalogoReemplazos: {},
+    catalogoColores: {},   // { "E01": "Aluminio", "E02": "Bronce", ... }
     logs: [],
     colmenasDisponibles: [],
     datosCrudosOrdenes: [],
     resultadosOptimizacion: [],
     colmenasHistorico: [],
     mermas: [],
-    seriales: [],  // Nuevo array para almacenar los seriales disponibles
-    historialMermas: []  // Nuevo array para almacenar el historial de mermas desechadas
+    seriales: [],
+    historialMermas: []
 };
 
 // Variables globales para manejo de colmena desde Firebase
@@ -358,6 +359,7 @@ function cargarSistema() {
         SistemaInventario.ordenes = datos.ordenes || [];
         SistemaInventario.colmenas = datos.colmenas || [];
         SistemaInventario.catalogoReemplazos = datos.catalogoReemplazos || {};
+        SistemaInventario.catalogoColores = datos.catalogoColores || {};
         SistemaInventario.logs = datos.logs || [];
         SistemaInventario.colmenasDisponibles = datos.colmenasDisponibles || [];
         SistemaInventario.datosCrudosOrdenes = datos.datosCrudosOrdenes || [];
@@ -1161,14 +1163,16 @@ async function cargarCatalogo(event) {
         const datos = await leerExcelCompleto(file);
         const filaEncabezado = detectarFilaEncabezado(datos);
         const encabezados = datos[filaEncabezado];
-        let colCodigo = -1, colReemplazo = -1;
+        let colCodigo = -1, colReemplazo = -1, colColor = -1;
         for (let i = 0; i < encabezados.length; i++) {
             const enc = String(encabezados[i] || '').trim().toUpperCase();
             if (enc.includes('CODIGO') || enc === 'COD') colCodigo = i;
             if (enc.includes('REEMPLAZ')) colReemplazo = i;
+            if (enc === 'COLOR') colColor = i;  // Match exacto para evitar falsos positivos
         }
         if (colCodigo === -1 || colReemplazo === -1) { alert('No se encontraron columnas CODIGO y REEMPLAZO'); return; }
         SistemaInventario.catalogoReemplazos = {};
+        SistemaInventario.catalogoColores = {};
         for (let i = filaEncabezado + 1; i < datos.length; i++) {
             const fila = datos[i];
             if (!fila) continue;
@@ -1177,15 +1181,28 @@ async function cargarCatalogo(event) {
             if (codigo && reemplazo) {
                 const codigoLimpio = String(codigo).trim().toUpperCase();
                 SistemaInventario.catalogoReemplazos[codigoLimpio] = String(reemplazo).trim();
+                // Guardar color si la columna existe y tiene valor
+                if (colColor !== -1 && fila[colColor] !== null && fila[colColor] !== undefined) {
+                    const colorStr = String(fila[colColor]).trim();
+                    if (colorStr) SistemaInventario.catalogoColores[codigoLimpio] = colorStr;
+                }
             }
         }
         actualizarReemplazosEnOrdenes();
         actualizarTablaCatalogo();
-        log(`✓ Catálogo cargado: ${Object.keys(SistemaInventario.catalogoReemplazos).length} reemplazos`, 'success');
+        const nColores = Object.keys(SistemaInventario.catalogoColores).length;
+        log(`✓ Catálogo cargado: ${Object.keys(SistemaInventario.catalogoReemplazos).length} reemplazos, ${nColores} colores`, 'success');
         document.getElementById('estadoCatalogo').textContent = `✓ ${Object.keys(SistemaInventario.catalogoReemplazos).length} reemplazos`;
         document.getElementById('estadoCatalogo').className = 'estado-archivo estado-ok';
         guardarSistema();
     } catch (e) { alert('Error: ' + e.message); }
+}
+
+// Devuelve el color de un código desde el catálogo, normalizando el código antes de buscar
+function obtenerColorDeCatalogo(codigo) {
+    if (!codigo) return '';
+    const cod = String(codigo).trim().toUpperCase();
+    return SistemaInventario.catalogoColores[cod] || '';
 }
 
 function formatearValor(valor) {
@@ -2027,59 +2044,63 @@ function ejecutarOptimizacion() {
 
 function exportarResultados() {
     if (SistemaInventario.resultadosOptimizacion.length === 0) return alert('No hay resultados');
-    const datosExcel = [['OT', 'Ubicación', 'Acción', 'Colmena', 'Código', 'Medida (cm)', 'Lote', 'Paquete', 'Serial', 'Fecha Serial']];
-    
+    // COLOR va después de Código (columna 5, índice 5)
+    const datosExcel = [['OT', 'Ubicación', 'Acción', 'Colmena', 'Código', 'Color', 'Medida (cm)', 'Lote', 'Paquete', 'Serial', 'Fecha Serial']];
+
     SistemaInventario.resultadosOptimizacion.forEach(item => {
         const res = item.resultado;
         const ord = SistemaInventario.ordenes.find(o => o.id === res.orden) || {};
-        
-        // Recuperar serial si existe en la orden o en el resultado
+
         const s = res.serial || ord.serial || {};
         const fechaFormateada = s.fecha ? formatearFecha(s.fecha) : '-';
-        
+        const codigoPrincipal = res.codigo || ord.cod || '-';
+        const color = obtenerColorDeCatalogo(codigoPrincipal);
+
         // Fila CORTAR
         datosExcel.push([
-            ord.ot || '-', 
-            ord.ubic || '-', 
-            'CORTAR', 
-            res.fuente === 'tubo_nuevo' ? 'TUBO NUEVO' : (res.colmena || '-'), 
-            res.codigo || ord.cod || '-', 
+            ord.ot || '-',
+            ord.ubic || '-',
+            'CORTAR',
+            res.fuente === 'tubo_nuevo' ? 'TUBO NUEVO' : (res.colmena || '-'),
+            codigoPrincipal,
+            color,
             res.medida_cm,
-            s.lote || '-', 
-            s.paquete || '-', 
-            s.serial || '-', 
+            s.lote || '-',
+            s.paquete || '-',
+            s.serial || '-',
             fechaFormateada
         ]);
-        
+
         // Si existe un sobrante (> 0), insertar una fila según si es desecho o no
         if (res.sobrante_cm > 0) {
-            // 🔄 CAMBIO: Verificar si es un desecho (≤ 10 cm) o un sobrante normal
             if (res.es_desecho) {
-                // Es un desecho (≤ 10 cm)
+                // Merma ≤ 10 cm
                 datosExcel.push([
-                    ord.ot || '-', 
-                    '', 
-                    'DESECHAR MERMA', 
-                    'BASURERO', 
-                    res.codigo || ord.cod || '-', 
+                    ord.ot || '-',
+                    '',
+                    'DESECHAR MERMA',
+                    'BASURERO',
+                    codigoPrincipal,
+                    color,
                     res.sobrante_cm,
-                    s.lote || ord.lote || '-', 
-                    s.paquete || ord.paquete || '-', 
-                    s.serial || ord.serial || '-', 
+                    s.lote || ord.lote || '-',
+                    s.paquete || ord.paquete || '-',
+                    s.serial || ord.serial || '-',
                     s.fecha || ord.fecha || '-'
                 ]);
             } else {
-                // Es un sobrante normal (> 10 cm)
+                // Sobrante normal (> 10 cm)
                 datosExcel.push([
-                    ord.ot || '-', 
-                    '', 
-                    'GUARDAR SOBRANTE', 
-                    res.colmena || '-', 
-                    res.codigo || ord.cod || '-', 
+                    ord.ot || '-',
+                    '',
+                    'GUARDAR SOBRANTE',
+                    res.colmena || '-',
+                    codigoPrincipal,
+                    color,
                     res.sobrante_cm,
-                    s.lote || ord.lote || '-', 
-                    s.paquete || ord.paquete || '-', 
-                    s.serial || ord.serial || '-', 
+                    s.lote || ord.lote || '-',
+                    s.paquete || ord.paquete || '-',
+                    s.serial || ord.serial || '-',
                     s.fecha || ord.fecha || '-'
                 ]);
             }
