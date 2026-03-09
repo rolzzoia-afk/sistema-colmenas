@@ -1061,18 +1061,28 @@ async function cargarOrdenes(event) {
         const encabezados = SistemaInventario.datosCrudosOrdenes[filaEncabezado];
         const mapeoColumnas = detectarColumnasExcel(encabezados);
 
-        // Buscar columna TUBO: primero detección estándar, luego escaneo directo con
-        // normalización agresiva (cubre espacios non-breaking, tabulaciones, mayúsculas, etc.)
-        let colTuboIdx = mapeoColumnas['tubo'];
-        if (colTuboIdx === undefined) {
-            for (let i = 0; i < encabezados.length; i++) {
-                const h = String(encabezados[i] || '').replace(/[\s\u00A0\t]+/g, ' ').trim().toLowerCase();
-                if (h === 'tubo') { colTuboIdx = i; break; }
-            }
+        // Detección dinámica de columna TUBO: búsqueda por nombre en encabezados crudos.
+        // 1° intento: coincidencia exacta "TUBO"
+        // 2° intento: contiene "TUBO" pero no es "TUBERIA" (para encabezados como "N° TUBO")
+        const _normH = h => String(h || '').replace(/[\s\u00A0\t]+/g, ' ').trim().toUpperCase();
+        let idxTubo = encabezados.findIndex(h => _normH(h) === 'TUBO');
+        if (idxTubo === -1) {
+            idxTubo = encabezados.findIndex(h => {
+                const n = _normH(h);
+                return n.includes('TUBO') && !n.includes('TUBERIA');
+            });
         }
-        log(`🔍 Columna TUBO detectada en índice: ${colTuboIdx !== undefined ? colTuboIdx : 'NO ENCONTRADA'}`, 'info');
-        const colMedidaIdx = colTuboIdx !== undefined
-            ? colTuboIdx
+        console.log("📍 Columna TUBO detectada dinámicamente en índice:", idxTubo);
+        log(`🔍 Columna TUBO en índice: ${idxTubo !== -1 ? idxTubo : 'NO ENCONTRADA (usando fallback)'}`, 'info');
+
+        // Fallback: si no se encontró TUBO, usar el índice de ANCHO REAL / medida estándar
+        const idxAnchoReal = idxTubo !== -1 ? -1
+            : encabezados.findIndex(h => _normH(h).includes('ANCHO REAL'))
+              !== -1 ? encabezados.findIndex(h => _normH(h).includes('ANCHO REAL'))
+              : mapeoColumnas['medida'] !== undefined ? mapeoColumnas['medida'] : -1;
+
+        const colMedidaIdx = idxTubo !== -1 ? idxTubo
+            : idxAnchoReal !== -1 ? idxAnchoReal
             : mapeoColumnas['medida'];
 
         SistemaInventario.ordenes = [];
@@ -1106,11 +1116,9 @@ async function cargarOrdenes(event) {
                 }
 
                 // --- OVERRIDE NUCLEAR DE MEDIDA ---
-                // orden['tubo'] ya fue seteado correctamente por el loop de COLUMNAS_ESPECIALES
-                // desde mapeoColumnas['tubo']. Lo usamos como fuente primaria de verdad.
-                const _valTubo = (orden['tubo'] !== null && orden['tubo'] !== undefined)
-                    ? limpiarNumero(orden['tubo'])
-                    : null;
+                // Leer directamente desde fila[idxTubo] (índice hallado dinámicamente),
+                // evitando cualquier contaminación por el loop de COLUMNAS_ESPECIALES.
+                const _valTubo = idxTubo !== -1 ? limpiarNumero(fila[idxTubo]) : null;
                 const _medidaFinal = (_valTubo !== null && _valTubo > 0)
                     ? _valTubo
                     : limpiarNumero(orden['medida']);
