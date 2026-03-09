@@ -21,7 +21,8 @@ const SistemaInventario = {
     resultadosOptimizacion: [],
     colmenasHistorico: [],
     mermas: [],
-    seriales: []  // Nuevo array para almacenar los seriales disponibles
+    seriales: [],  // Nuevo array para almacenar los seriales disponibles
+    historialMermas: []  // Nuevo array para almacenar el historial de mermas desechadas
 };
 
 // Variables globales para manejo de colmena desde Firebase
@@ -1725,11 +1726,11 @@ function ejecutarOptimizacion() {
             const esReemplazo = tuboEncontrado.esReemplazo;
             let fuente = esMerma ? 'merma' : (esReemplazo ? 'reemplazo' : 'colmena');
 
-            resultado = { orden: orden.id, medida_cm: orden.medida_cm, fuente: fuente, colmena: tuboEncontrado.colmena.n_colmena, codigo: tuboEncontrado.colmena.cod, codigo_original: codOrden, sobrante_cm: tuboEncontrado.sobrante_mm / 10, serial: tuboEncontrado.colmena.serial || null };
+            resultado = { orden: orden.id, medida_cm: orden.medida_cm, fuente: fuente, colmena: tuboEncontrado.colmena.n_colmena, codigo: tuboEncontrado.colmena.cod, codigo_original: codOrden, sobrante_cm: tuboEncontrado.sobrante_mm / 10, serial: tuboEncontrado.colmena.serial || null, es_desecho: esMerma };
             const idxHistorico = SistemaInventario.colmenasHistorico.findIndex(c => c.n_colmena === tuboEncontrado.colmena.n_colmena);
             const sobrante = tuboEncontrado.medidaOriginal - orden.medida_mm - MM_KERF;
             const clasificacion = evaluarSobrante(sobrante);
-            
+
             if (clasificacion.estado === 'merma') {
                 SistemaInventario.mermas.push({
                     orden: orden.id,
@@ -1740,15 +1741,16 @@ function ejecutarOptimizacion() {
                     valor: sobrante / 10,
                     codigoUsado: tuboEncontrado.colmena.cod
                 });
-                SistemaInventario.colmenasDisponibles.push({
-                    n_colmena: tuboEncontrado.colmena.n_colmena,
-                    medida_mm: tuboEncontrado.colmena.medida_mm,
-                    medida_cm: tuboEncontrado.colmena.medida_cm,
-                    cod: tuboEncontrado.colmena.cod
-                });
+                // CORRECCIÓN: eliminar el tubo de colmenasDisponibles (el slot queda vacío)
+                SistemaInventario.colmenasDisponibles.splice(tuboEncontrado.indice, 1);
                 if (idxHistorico !== -1) {
+                    // La colmena física queda VACÍA y DISPONIBLE: medida 0, código ''
                     SistemaInventario.colmenasHistorico[idxHistorico].estado = 'disponible';
-                    SistemaInventario.colmenasHistorico[idxHistorico].origen = 'Original (reusado por merma)';
+                    SistemaInventario.colmenasHistorico[idxHistorico].medida_mm = 0;
+                    SistemaInventario.colmenasHistorico[idxHistorico].medida_cm = 0;
+                    SistemaInventario.colmenasHistorico[idxHistorico].cod = '';
+                    SistemaInventario.colmenasHistorico[idxHistorico].serial = null;
+                    SistemaInventario.colmenasHistorico[idxHistorico].origen = 'MERMA desechada (tubo consumido)';
                 }
             } else if (clasificacion.estado !== 'prohibido') {
                 if (idxHistorico !== -1) { SistemaInventario.colmenasHistorico[idxHistorico].estado = 'usada'; SistemaInventario.colmenasHistorico[idxHistorico].origen = 'Orden ' + orden.id; }
@@ -1786,20 +1788,21 @@ function ejecutarOptimizacion() {
                         const esMerma = tuboReemplazo.clasificacion && tuboReemplazo.clasificacion.estado === 'merma';
                         let fuente = esMerma ? 'merma' : 'reemplazo';
 
-                        resultado = { 
-                            orden: orden.id, 
-                            medida_cm: orden.medida_cm, 
-                            fuente: fuente, 
-                            colmena: tuboReemplazo.colmena.n_colmena, 
-                            codigo_original: tuboReemplazo.colmena.cod, 
-                            codigo_reemplazo: codReemplazo, 
+                        resultado = {
+                            orden: orden.id,
+                            medida_cm: orden.medida_cm,
+                            fuente: fuente,
+                            colmena: tuboReemplazo.colmena.n_colmena,
+                            codigo_original: tuboReemplazo.colmena.cod,
+                            codigo_reemplazo: codReemplazo,
                             sobrante_cm: tuboReemplazo.sobrante_mm / 10,
-                            serial: tuboReemplazo.colmena.serial || null
+                            serial: tuboReemplazo.colmena.serial || null,
+                            es_desecho: esMerma
                         };
                         const idxHistorico = SistemaInventario.colmenasHistorico.findIndex(c => c.n_colmena === tuboReemplazo.colmena.n_colmena);
                         const sobrante = tuboReemplazo.medidaOriginal - orden.medida_mm - MM_KERF;
                         const clasificacion = evaluarSobrante(sobrante);
-                        
+
                         if (clasificacion.estado === 'merma') {
                             SistemaInventario.mermas.push({
                                 orden: orden.id,
@@ -1810,16 +1813,16 @@ function ejecutarOptimizacion() {
                                 valor: sobrante / 10,
                                 codigoUsado: codReemplazo
                             });
-
-                            SistemaInventario.colmenasDisponibles.push({
-                                n_colmena: tuboReemplazo.colmena.n_colmena,
-                                medida_mm: tuboReemplazo.colmena.medida_mm,
-                                medida_cm: tuboReemplazo.colmena.medida_cm,
-                                cod: tuboReemplazo.colmena.cod
-                            });
+                            // CORRECCIÓN: eliminar el tubo de colmenasDisponibles (el slot queda vacío)
+                            SistemaInventario.colmenasDisponibles.splice(tuboReemplazo.indice, 1);
                             if (idxHistorico !== -1) {
+                                // La colmena física queda VACÍA y DISPONIBLE: medida 0, código ''
                                 SistemaInventario.colmenasHistorico[idxHistorico].estado = 'disponible';
-                                SistemaInventario.colmenasHistorico[idxHistorico].origen = 'Original (reusado por merma)';
+                                SistemaInventario.colmenasHistorico[idxHistorico].medida_mm = 0;
+                                SistemaInventario.colmenasHistorico[idxHistorico].medida_cm = 0;
+                                SistemaInventario.colmenasHistorico[idxHistorico].cod = '';
+                                SistemaInventario.colmenasHistorico[idxHistorico].serial = null;
+                                SistemaInventario.colmenasHistorico[idxHistorico].origen = 'MERMA desechada (tubo consumido)';
                             }
                         } else if (clasificacion.estado !== 'prohibido') {
                             SistemaInventario.colmenasHistorico[idxHistorico].codigo_original = tuboReemplazo.colmena.cod;
@@ -1851,9 +1854,7 @@ function ejecutarOptimizacion() {
                                     cod: codReemplazo
                                 });
                             }
-                            if (!esMerma) {
-                                SistemaInventario.colmenasDisponibles.splice(tuboReemplazo.indice, 1);
-                            }
+                            SistemaInventario.colmenasDisponibles.splice(tuboReemplazo.indice, 1);
                         }
                         break;
                     }
@@ -2044,24 +2045,60 @@ function exportarResultados() {
             fechaFormateada
         ]);
         
-        // Si existe un sobrante (> 0), insertar una fila de "GUARDAR SOBRANTE" inmediatamente después
+        // Si existe un sobrante (> 0), insertar una fila según si es desecho o no
         if (res.sobrante_cm > 0) {
-            datosExcel.push([
-                ord.ot || '-', 
-                '', 
-                'GUARDAR SOBRANTE', 
-                res.colmena || '-', 
-                res.codigo || ord.cod || '-', 
-                res.sobrante_cm,
-                s.lote || ord.lote || '-', 
-                s.paquete || ord.paquete || '-', 
-                s.serial || ord.serial || '-', 
-                s.fecha || ord.fecha || '-'
-            ]);
+            // 🔄 CAMBIO: Verificar si es un desecho (≤ 10 cm) o un sobrante normal
+            if (res.es_desecho) {
+                // Es un desecho (≤ 10 cm)
+                datosExcel.push([
+                    ord.ot || '-', 
+                    '', 
+                    'DESECHAR MERMA', 
+                    'BASURERO', 
+                    res.codigo || ord.cod || '-', 
+                    res.sobrante_cm,
+                    s.lote || ord.lote || '-', 
+                    s.paquete || ord.paquete || '-', 
+                    s.serial || ord.serial || '-', 
+                    s.fecha || ord.fecha || '-'
+                ]);
+            } else {
+                // Es un sobrante normal (> 10 cm)
+                datosExcel.push([
+                    ord.ot || '-', 
+                    '', 
+                    'GUARDAR SOBRANTE', 
+                    res.colmena || '-', 
+                    res.codigo || ord.cod || '-', 
+                    res.sobrante_cm,
+                    s.lote || ord.lote || '-', 
+                    s.paquete || ord.paquete || '-', 
+                    s.serial || ord.serial || '-', 
+                    s.fecha || ord.fecha || '-'
+                ]);
+            }
         }
     });
     
     const ws = XLSX.utils.aoa_to_sheet(datosExcel);
+    
+    // Aplicar estilos a las filas de desecho para que sean visualmente distintas
+    const range = XLSX.utils.decode_range(ws['!ref']);
+    for (let R = 1; R <= range.e.r; ++R) {
+        const accionCell = ws[XLSX.utils.encode_cell({r: R, c: 2})]; // Columna "Acción"
+        if (accionCell && accionCell.v === 'DESECHAR MERMA') {
+            // Marcar visualmente las filas de desecho (esto se aplicará cuando se abra en Excel)
+            for (let C = 0; C <= range.e.c; ++C) {
+                const cell = ws[XLSX.utils.encode_cell({r: R, c: C})];
+                if (cell) {
+                    if (!cell.s) cell.s = {};
+                    cell.s.fill = {fgColor: {rgb: "FFFF9999"}}; // Fondo rojo claro
+                    cell.s.font = {color: {rgb: "FF990000"}, bold: true}; // Texto rojo oscuro en negrita
+                }
+            }
+        }
+    }
+    
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Plan de Corte');
     XLSX.writeFile(wb, `plan_corte_${new Date().toISOString().slice(0,10)}.xlsx`);
