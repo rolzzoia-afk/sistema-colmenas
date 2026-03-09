@@ -1060,9 +1060,19 @@ async function cargarOrdenes(event) {
         const filaEncabezado = detectarFilaEncabezado(SistemaInventario.datosCrudosOrdenes);
         const encabezados = SistemaInventario.datosCrudosOrdenes[filaEncabezado];
         const mapeoColumnas = detectarColumnasExcel(encabezados);
-        // Priorizar columna 'tubo' (AGASSI) sobre 'medida' (ANCHO REAL) como fuente de la medida a cortar
-        const colMedidaIdx = mapeoColumnas['tubo'] !== undefined
-            ? mapeoColumnas['tubo']
+
+        // Buscar columna TUBO: primero detección estándar, luego escaneo directo con
+        // normalización agresiva (cubre espacios non-breaking, tabulaciones, mayúsculas, etc.)
+        let colTuboIdx = mapeoColumnas['tubo'];
+        if (colTuboIdx === undefined) {
+            for (let i = 0; i < encabezados.length; i++) {
+                const h = String(encabezados[i] || '').replace(/[\s\u00A0\t]+/g, ' ').trim().toLowerCase();
+                if (h === 'tubo') { colTuboIdx = i; break; }
+            }
+        }
+        log(`🔍 Columna TUBO detectada en índice: ${colTuboIdx !== undefined ? colTuboIdx : 'NO ENCONTRADA'}`, 'info');
+        const colMedidaIdx = colTuboIdx !== undefined
+            ? colTuboIdx
             : mapeoColumnas['medida'];
 
         SistemaInventario.ordenes = [];
