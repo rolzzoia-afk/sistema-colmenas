@@ -1364,6 +1364,7 @@ function actualizarTablaColmenasResultado() {
             <td>${r.codigo || '-'}</td>
             <td>${color}</td>
             <td>${r.medida_cm} cm</td>
+            <td>${r.medida_origen !== undefined ? r.medida_origen + ' cm' : '-'}</td>
             <td><span class="tag-accion">CORTAR</span></td>
         </tr>`;
     }).join('');
@@ -1748,13 +1749,14 @@ function ejecutarOptimizacion() {
         const tuboEncontrado = buscarTubosParaOrden(codOrden, orden.medida_mm, codOrden);
         
         if (tuboEncontrado && tuboEncontrado.sobrante_mm === 0) {
-            resultado = { 
-                orden: orden.id, 
-                medida_cm: orden.medida_cm, 
-                fuente: 'exacta', 
-                colmena: tuboEncontrado.colmena.n_colmena, 
-                codigo: tuboEncontrado.colmena.cod, 
+            resultado = {
+                orden: orden.id,
+                medida_cm: orden.medida_cm,
+                fuente: 'exacta',
+                colmena: tuboEncontrado.colmena.n_colmena,
+                codigo: tuboEncontrado.colmena.cod,
                 sobrante_cm: 0,
+                medida_origen: tuboEncontrado.colmena.medida_cm,
                 serial: tuboEncontrado.colmena.serial || orden.serial || null
             };
             const idxHistorico = SistemaInventario.colmenasHistorico.findIndex(c => c.n_colmena === tuboEncontrado.colmena.n_colmena);
@@ -1765,7 +1767,7 @@ function ejecutarOptimizacion() {
             const esReemplazo = tuboEncontrado.esReemplazo;
             let fuente = esMerma ? 'merma' : (esReemplazo ? 'reemplazo' : 'colmena');
 
-            resultado = { orden: orden.id, medida_cm: orden.medida_cm, fuente: fuente, colmena: tuboEncontrado.colmena.n_colmena, codigo: tuboEncontrado.colmena.cod, codigo_original: codOrden, sobrante_cm: tuboEncontrado.sobrante_mm / 10, serial: tuboEncontrado.colmena.serial || null, es_desecho: esMerma };
+            resultado = { orden: orden.id, medida_cm: orden.medida_cm, fuente: fuente, colmena: tuboEncontrado.colmena.n_colmena, codigo: tuboEncontrado.colmena.cod, codigo_original: codOrden, sobrante_cm: tuboEncontrado.sobrante_mm / 10, medida_origen: tuboEncontrado.medidaOriginal / 10, serial: tuboEncontrado.colmena.serial || null, es_desecho: esMerma };
             const idxHistorico = SistemaInventario.colmenasHistorico.findIndex(c => c.n_colmena === tuboEncontrado.colmena.n_colmena);
             const sobrante = tuboEncontrado.medidaOriginal - orden.medida_mm - MM_KERF;
             const clasificacion = evaluarSobrante(sobrante);
@@ -1835,6 +1837,7 @@ function ejecutarOptimizacion() {
                             codigo_original: tuboReemplazo.colmena.cod,
                             codigo_reemplazo: codReemplazo,
                             sobrante_cm: tuboReemplazo.sobrante_mm / 10,
+                            medida_origen: tuboReemplazo.medidaOriginal / 10,
                             serial: tuboReemplazo.colmena.serial || null,
                             es_desecho: esMerma
                         };
@@ -1915,13 +1918,14 @@ function ejecutarOptimizacion() {
                 
                 // Crear el resultado con información del serial y colmena asignada
                 if (serialDisponible) {
-                    resultado = { 
-                        orden: orden.id, 
-                        medida_cm: orden.medida_cm, 
+                    resultado = {
+                        orden: orden.id,
+                        medida_cm: orden.medida_cm,
                         fuente: 'tubo_nuevo',
                         colmena: posicionNueva,
-                        codigo_original: codOrden, 
+                        codigo_original: codOrden,
                         sobrante_cm: sobranteNuevo / 10,
+                        medida_origen: MM_TUBO_ORIGINAL / 10,
                         serial: serialDisponible
                     };
                     
@@ -1930,13 +1934,14 @@ function ejecutarOptimizacion() {
                     
                     log(`🏷️ Serial asignado: ${serialDisponible.codigo} - Lote: ${serialDisponible.lote} - Paquete: ${serialDisponible.paquete} - Serial: ${serialDisponible.serial}`, 'info');
                 } else {
-                    resultado = { 
-                        orden: orden.id, 
-                        medida_cm: orden.medida_cm, 
+                    resultado = {
+                        orden: orden.id,
+                        medida_cm: orden.medida_cm,
                         fuente: 'tubo_nuevo',
                         colmena: posicionNueva,
-                        codigo_original: codOrden, 
-                        sobrante_cm: sobranteNuevo / 10
+                        codigo_original: codOrden,
+                        sobrante_cm: sobranteNuevo / 10,
+                        medida_origen: MM_TUBO_ORIGINAL / 10
                     };
                     
                     log(`⚠️ No se encontró serial disponible para el código ${codOrden}`, 'warn');
@@ -2065,7 +2070,7 @@ function ejecutarOptimizacion() {
 function exportarResultados() {
     if (SistemaInventario.resultadosOptimizacion.length === 0) return alert('No hay resultados');
     // COLOR va después de Código (columna 5, índice 5)
-    const datosExcel = [['OT', 'Ubicación', 'Acción', 'Colmena', 'Código', 'Color', 'Medida (cm)', 'Lote', 'Paquete', 'Serial', 'Fecha Serial']];
+    const datosExcel = [['OT', 'Ubicación', 'Acción', 'Colmena', 'Código', 'Color', 'Medida a Cortar (cm)', 'Tubo Origen (cm)', 'Lote', 'Paquete', 'Serial', 'Fecha Serial']];
 
     SistemaInventario.resultadosOptimizacion.forEach(item => {
         const res = item.resultado;
@@ -2086,6 +2091,7 @@ function exportarResultados() {
             codigoPrincipal,
             color,
             res.medida_cm,
+            res.medida_origen || '-',
             s.lote || '-',
             s.paquete || '-',
             s.serial || '-',
@@ -2104,6 +2110,7 @@ function exportarResultados() {
                     codigoPrincipal,
                     color,
                     res.sobrante_cm,
+                    '-',
                     s.lote || ord.lote || '-',
                     s.paquete || ord.paquete || '-',
                     s.serial || ord.serial || '-',
@@ -2119,6 +2126,7 @@ function exportarResultados() {
                     codigoPrincipal,
                     color,
                     res.sobrante_cm,
+                    '-',
                     s.lote || ord.lote || '-',
                     s.paquete || ord.paquete || '-',
                     s.serial || ord.serial || '-',
