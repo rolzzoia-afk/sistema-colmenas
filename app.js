@@ -1238,6 +1238,8 @@ function formatearValor(valor) {
 }
 
 function actualizarTablaOrdenes() {
+    console.log("🚨 REVISIÓN DE RENDERIZADO - Primera orden:", SistemaInventario.ordenes[0]);
+
     let columnasVisibles = detectarColumnasConDatos(SistemaInventario.ordenes);
 
     // Columna Color: posición fija después de Tubería (se reconstruye desde cero en cada llamada)
@@ -1252,6 +1254,10 @@ function actualizarTablaOrdenes() {
         const celdas = columnasVisibles.map(col => {
             if (col.key === '_colorCatalogo') {
                 return `<td>${obtenerColorDeCatalogo(orden.cod || orden.codigoExtraido || '')}</td>`;
+            }
+            // Columna 'medida': forzar siempre orden.medida_cm (fuente de verdad post-override)
+            if (col.key === 'medida') {
+                return `<td>${formatearValor(orden.medida_cm)}</td>`;
             }
             return `<td>${formatearValor(orden[col.key])}</td>`;
         }).join('');
