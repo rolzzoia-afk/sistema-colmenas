@@ -1212,12 +1212,32 @@ function formatearValor(valor) {
 }
 
 function actualizarTablaOrdenes() {
-    const columnasVisibles = detectarColumnasConDatos(SistemaInventario.ordenes);
+    let columnasVisibles = detectarColumnasConDatos(SistemaInventario.ordenes);
+    const tenemosCatalogColor = Object.keys(SistemaInventario.catalogoColores).length > 0;
+
+    // Inyectar columna "Color" después de "Código" o "Tubería" cuando el catálogo tiene colores
+    if (tenemosCatalogColor && !columnasVisibles.some(c => c.key === '_colorCatalogo')) {
+        const posInsertar = columnasVisibles.findIndex(
+            c => c.key === 'codigoExtraido' || c.titulo === 'Código' || c.key === 'tuberia'
+        );
+        const colorCol = { key: '_colorCatalogo', titulo: 'Color', esNumero: false };
+        if (posInsertar !== -1) {
+            columnasVisibles.splice(posInsertar + 1, 0, colorCol);
+        } else {
+            columnasVisibles.push(colorCol);
+        }
+    }
+
     const headerRow = document.getElementById('headerOrdenes');
     headerRow.innerHTML = columnasVisibles.map(col => `<th>${col.titulo}</th>`).join('');
     const tbody = document.getElementById('tbodyOrdenes');
     tbody.innerHTML = SistemaInventario.ordenes.map(orden => {
-        const celdas = columnasVisibles.map(col => `<td>${formatearValor(orden[col.key])}</td>`).join('');
+        const celdas = columnasVisibles.map(col => {
+            if (col.key === '_colorCatalogo') {
+                return `<td>${obtenerColorDeCatalogo(orden.codigoExtraido || orden.cod || '')}</td>`;
+            }
+            return `<td>${formatearValor(orden[col.key])}</td>`;
+        }).join('');
         return `<tr>${celdas}</tr>`;
     }).join('');
 }
@@ -1342,11 +1362,37 @@ function formatearResultado(orden, resultado) {
 function actualizarTablaColmenasResultado() {
     const tbody = document.getElementById('tbodyColmenasResultado');
     if (!tbody) return;
+    const tenemosCatalogColor = Object.keys(SistemaInventario.catalogoColores).length > 0;
+
+    // Inyectar <th>Color</th> en el thead si no existe aún
+    const tabla = tbody.closest('table');
+    if (tabla) {
+        const theadTr = tabla.querySelector('thead tr');
+        if (theadTr) {
+            const yaExiste = [...theadTr.querySelectorAll('th')].some(th => th.textContent.trim() === 'Color');
+            if (tenemosCatalogColor && !yaExiste) {
+                const thCodigo = [...theadTr.querySelectorAll('th')]
+                    .find(th => th.textContent.includes('Código'));
+                const colorTh = document.createElement('th');
+                colorTh.textContent = 'Color';
+                if (thCodigo) thCodigo.insertAdjacentElement('afterend', colorTh);
+                else theadTr.appendChild(colorTh);
+            } else if (!tenemosCatalogColor && yaExiste) {
+                [...theadTr.querySelectorAll('th')]
+                    .find(th => th.textContent.trim() === 'Color')?.remove();
+            }
+        }
+    }
+
     tbody.innerHTML = SistemaInventario.resultadosOptimizacion.map(item => {
         const r = item.resultado;
+        const colorTd = tenemosCatalogColor
+            ? `<td>${r.color || obtenerColorDeCatalogo(r.codigo || r.codigo_original || '')}</td>`
+            : '';
         return `<tr>
             <td>${r.colmena || 'TUBO NUEVO'}</td>
             <td>${r.codigo || '-'}</td>
+            ${colorTd}
             <td>${r.medida_cm} cm</td>
             <td><span class="tag-accion">CORTAR</span></td>
         </tr>`;
@@ -1996,6 +2042,10 @@ function ejecutarOptimizacion() {
             }
         }
         
+        // Agregar color del catálogo al resultado para trazabilidad
+        if (resultado) {
+            resultado.color = obtenerColorDeCatalogo(resultado.codigo || resultado.codigo_original || '');
+        }
         resultados.push(resultado);
         SistemaInventario.resultadosOptimizacion.push({ orden: orden, resultado: resultado });
         const infoResultado = formatearResultado(orden, resultado);
@@ -2054,7 +2104,8 @@ function exportarResultados() {
         const s = res.serial || ord.serial || {};
         const fechaFormateada = s.fecha ? formatearFecha(s.fecha) : '-';
         const codigoPrincipal = res.codigo || ord.cod || '-';
-        const color = obtenerColorDeCatalogo(codigoPrincipal);
+        // res.color ya se setea en ejecutarOptimizacion; fallback a lookup directo
+        const color = res.color || obtenerColorDeCatalogo(codigoPrincipal);
 
         // Fila CORTAR
         datosExcel.push([
