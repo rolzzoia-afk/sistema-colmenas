@@ -1093,6 +1093,9 @@ async function cargarOrdenes(event) {
                         orden[nombre] = valorCelda;
                     }
                 }
+                // Re-sincronizar 'medida' con el valor ya calculado desde TUBO (colMedidaIdx),
+                // evitando que el loop anterior la sobreescriba con ANCHO REAL.
+                orden['medida'] = orden.medida_cm;
                 for (const colEsp of COLUMNAS_ESPECIFICAS) {
                     const idx = mapeoColumnas[colEsp.key];
                     if (idx !== undefined && idx !== null) orden[colEsp.key] = fila[idx];
