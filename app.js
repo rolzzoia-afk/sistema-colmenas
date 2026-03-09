@@ -128,75 +128,41 @@ async function guardarEnFirestore() {
 
 // Función para cargar desde Firestore
 async function cargarDesdeFirestore() {
-    // Mostrar el overlay de carga
     document.getElementById('loading-overlay').style.display = 'flex';
-    
+
     try {
         const user = window.firebaseAuth.currentUser;
-        if (!user) {
+        if (!user || !user.email) {
             console.log("No hay usuario logueado para cargar desde Firestore");
             return;
         }
 
         const db = window.firebaseDb;
-
-        // Crear la referencia al documento
         const docRef = window.firebaseDoc(db, "usuarios", user.email, "inventario", "datos");
-        
-        try {
-            // Obtener el documento usando firebaseGetDoc (singular)
-            const docSnap = await window.firebaseGetDoc(docRef);
-            
-            if (docSnap && docSnap.exists()) {
-                const docData = docSnap.data();
-                if (docData && docData.data) {
-                    // Parsear el JSON guardado para restaurar los arrays originales
-                    const datos = JSON.parse(docData.data);
-                    
-                    // Actualizar el objeto global con los datos recuperados
-                    Object.assign(SistemaInventario, datos);
-                    
-                    console.log("✅ Inventario cargado correctamente desde Firestore");
-                } else {
-                    console.log("El documento existe pero no contiene datos válidos");
-                }
+
+        // Usar getDocFromServer para forzar lectura sin caché y evitar datos obsoletos
+        const docSnap = await window.firebaseGetDocFromServer(docRef);
+
+        if (docSnap && docSnap.exists()) {
+            const docData = docSnap.data();
+            if (docData && docData.data) {
+                const datos = JSON.parse(docData.data);
+                Object.assign(SistemaInventario, datos);
+                console.log("✅ Inventario cargado correctamente desde Firestore");
             } else {
-                console.log("No hay inventario guardado aún en Firestore");
+                console.log("El documento existe pero no contiene datos válidos");
             }
-        } catch (docError) {
-            console.error("Error específico al obtener el documento:", docError);
-            
-            // Intento alternativo usando la sintaxis antigua si la nueva falla
-            try {
-                const docSnap = await window.firebaseGetDoc(
-                    window.firebaseDoc(db, "usuarios", user.email, "inventario", "datos")
-                );
-                
-                if (docSnap && docSnap.exists()) {
-                    const docData = docSnap.data();
-                    if (docData && docData.data) {
-                        // Parsear el JSON guardado para restaurar los arrays originales
-                        const datos = JSON.parse(docData.data);
-                        
-                        // Actualizar el objeto global con los datos recuperados
-                        Object.assign(SistemaInventario, datos);
-                        
-                        console.log("✅ Inventario cargado correctamente desde Firestore (método alternativo)");
-                    }
-                }
-            } catch (altError) {
-                console.error("Error en método alternativo:", altError);
-                throw altError; // Re-lanzar para el catch exterior
-            }
+        } else {
+            console.log("No hay inventario guardado aún en Firestore");
         }
 
-        // Cargar colmena_final específica desde Firebase (no bloquea si falla)
+        // Cargar colmena_final y registrar listener real-time
         await cargarColmenaFinalDesdeFirestore();
+
     } catch (error) {
         console.error("Error cargando desde Firestore:", error);
         log("❌ Error cargando desde Firestore: " + error.message, "error");
     } finally {
-        // Ocultar el overlay de carga independientemente del resultado
         document.getElementById('loading-overlay').style.display = 'none';
     }
 }
@@ -266,55 +232,62 @@ function actualizarIndicadorFuente(esManual) {
 
 // Carga la colmena_final guardada en Firebase y la asigna a colmenaActual
 async function cargarColmenaFinalDesdeFirestore() {
+    const user = window.firebaseAuth.currentUser;
+    if (!user || !user.email) return;
+
+    const db = window.firebaseDb;
+    const docRef = window.firebaseDoc(db, "usuarios", user.email, "colmena_final", "datos");
+
+    // Registrar el listener SIEMPRE (independiente de si el doc existe o no)
+    // onSnapshot dispara inmediatamente con el estado actual y luego en cada cambio
+    window.firebaseOnSnapshot(
+        docRef,
+        { includeMetadataChanges: false },
+        (snap) => {
+            if (snap.exists() && !snap.metadata.hasPendingWrites) {
+                const data = snap.data();
+                if (data && data.data) {
+                    colmenaActual = JSON.parse(data.data) || [];
+                    SistemaInventario.colmenas = colmenaActual;
+                    actualizarTablaColmenas();
+                    actualizarIndicadorFuente(false);
+                    verificarListo();
+                    console.log("🔄 Colmena final actualizada desde Firebase:", colmenaActual.length, "registros");
+                }
+            } else if (!snap.exists()) {
+                // Sin colmena_final guardada: usar SistemaInventario.colmenas como fallback
+                if (SistemaInventario.colmenas && SistemaInventario.colmenas.length > 0) {
+                    colmenaActual = SistemaInventario.colmenas;
+                    actualizarIndicadorFuente(false);
+                    verificarListo();
+                    console.log(`ℹ️ Sin colmena_final en Firebase. Usando colmenas del inventario (${colmenaActual.length})`);
+                } else {
+                    console.log("ℹ️ No hay colmena_final ni colmenas en inventario aún.");
+                }
+            }
+        },
+        (error) => {
+            // Error callback: evita "Message channel closed" por promesas sin handler
+            console.error("Error en listener onSnapshot de colmena_final:", error.code, error.message);
+        }
+    );
+
+    // Forzar lectura desde servidor para la sesión inicial (sin caché)
     try {
-        const user = window.firebaseAuth.currentUser;
-        if (!user) return;
-
-        const db = window.firebaseDb;
-        const docRef = window.firebaseDoc(db, "usuarios", user.email, "colmena_final", "datos");
-        
-        // 🔄 CAMBIO 1: Forzar lectura desde el servidor con getDocFromServer
         const docSnap = await window.firebaseGetDocFromServer(docRef);
-
         if (docSnap && docSnap.exists()) {
             const docData = docSnap.data();
             if (docData && docData.data) {
                 colmenaActual = JSON.parse(docData.data);
-                console.log(`✅ Colmena final cargada desde Firebase: ${colmenaActual.length} registros`);
+                SistemaInventario.colmenas = colmenaActual;
+                actualizarTablaColmenas();
                 actualizarIndicadorFuente(false);
                 verificarListo();
-                
-                // 🔄 CAMBIO 2: Implementar escucha activa con onSnapshot y metadatos
-                window.firebaseOnSnapshot(docRef, { includeMetadataChanges: false }, (docSnap) => {
-                    if (docSnap.exists() && !docSnap.metadata.hasPendingWrites) {
-                        const data = docSnap.data();
-                        if (data && data.data) {
-                            // Actualizar colmenaActual y SistemaInventario.colmenas con los datos frescos
-                            colmenaActual = JSON.parse(data.data) || [];
-                            SistemaInventario.colmenas = colmenaActual;
-                            
-                            // IMPORTANTE: Actualizar la tabla visual con los nuevos datos
-                            actualizarTablaColmenas();
-                            
-                            console.log("🔄 Datos frescos recibidos desde el servidor");
-                            console.log("🔄 Tabla de colmenas redibujada con datos frescos");
-                        }
-                    }
-                });
-            }
-        } else {
-            // Sin colmena_final guardada: usar SistemaInventario.colmenas como fallback
-            if (SistemaInventario.colmenas && SistemaInventario.colmenas.length > 0) {
-                colmenaActual = SistemaInventario.colmenas;
-                console.log(`ℹ️ Sin colmena_final en Firebase. Usando colmenas del inventario (${colmenaActual.length})`);
-                actualizarIndicadorFuente(false);
-                verificarListo();
-            } else {
-                console.log("ℹ️ No hay colmena_final ni colmenas en inventario aún.");
+                console.log(`✅ Colmena final cargada desde servidor: ${colmenaActual.length} registros`);
             }
         }
     } catch (error) {
-        console.error("Error cargando colmena_final desde Firestore:", error);
+        console.warn("getDocFromServer falló, el listener onSnapshot seguirá activo:", error.message);
     }
 }
 
