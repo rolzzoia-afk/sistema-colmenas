@@ -1195,6 +1195,7 @@ async function cargarCatalogo(event) {
         document.getElementById('estadoCatalogo').textContent = `✓ ${Object.keys(SistemaInventario.catalogoReemplazos).length} reemplazos`;
         document.getElementById('estadoCatalogo').className = 'estado-archivo estado-ok';
         guardarSistema();
+        actualizarTablaOrdenes(); // Refrescar tabla para mostrar colores en órdenes ya cargadas
     } catch (e) { alert('Error: ' + e.message); }
 }
 
@@ -1214,16 +1215,10 @@ function formatearValor(valor) {
 function actualizarTablaOrdenes() {
     let columnasVisibles = detectarColumnasConDatos(SistemaInventario.ordenes);
 
-    // Columna "Color" siempre presente después de "Código"/"Tubería"
-    // (vacía si el catálogo no está cargado; se rellena cuando sí lo está)
-    if (!columnasVisibles.some(c => c.key === '_colorCatalogo')) {
-        const posInsertar = columnasVisibles.findIndex(
-            c => c.key === 'codigoExtraido' || c.titulo === 'Código' || c.key === 'tuberia'
-        );
-        const colorCol = { key: '_colorCatalogo', titulo: 'Color', esNumero: false };
-        if (posInsertar !== -1) columnasVisibles.splice(posInsertar + 1, 0, colorCol);
-        else columnasVisibles.push(colorCol);
-    }
+    // Columna Color: posición fija después de Tubería (se reconstruye desde cero en cada llamada)
+    const posInsertar = columnasVisibles.findIndex(c => c.key === 'tuberia' || c.key === 'codigoExtraido');
+    if (posInsertar !== -1) columnasVisibles.splice(posInsertar + 1, 0, { key: '_colorCatalogo', titulo: 'Color' });
+    else columnasVisibles.push({ key: '_colorCatalogo', titulo: 'Color' });
 
     const headerRow = document.getElementById('headerOrdenes');
     headerRow.innerHTML = columnasVisibles.map(col => `<th>${col.titulo}</th>`).join('');
@@ -1231,7 +1226,7 @@ function actualizarTablaOrdenes() {
     tbody.innerHTML = SistemaInventario.ordenes.map(orden => {
         const celdas = columnasVisibles.map(col => {
             if (col.key === '_colorCatalogo') {
-                return `<td>${obtenerColorDeCatalogo(orden.codigoExtraido || orden.cod || '')}</td>`;
+                return `<td>${obtenerColorDeCatalogo(orden.cod || orden.codigoExtraido || '')}</td>`;
             }
             return `<td>${formatearValor(orden[col.key])}</td>`;
         }).join('');
