@@ -787,10 +787,30 @@ function ordenarColmena(a, b) {
 }
 
 function detectarFilaEncabezado(datos) {
-    for (let i = 0; i < Math.min(datos.length, 10); i++) {
+    // Palabras que identifican inequívocamente una fila de encabezado (match exacto)
+    const EXACTOS = new Set(['ot', 'tuberia', 'tubo', 'medida', 'corte', 'longitud']);
+    // Palabras que se buscan como substrings (son suficientemente específicas)
+    const PARCIALES = ['ancho real', 'alto real', 'cod sec'];
+
+    for (let i = 0; i < Math.min(datos.length, 30); i++) {
         if (!datos[i]) continue;
-        const tieneTexto = datos[i].some(cell => typeof cell === 'string' && cell.trim().length > 0);
-        if (tieneTexto) return i;
+        const celdas = datos[i]
+            .filter(c => c !== null && c !== undefined && String(c).trim() !== '')
+            .map(c => String(c).trim().toLowerCase());
+        if (celdas.length === 0) continue;
+
+        let hits = 0;
+        for (const c of celdas) {
+            if (EXACTOS.has(c) || PARCIALES.some(p => c.includes(p))) hits++;
+        }
+        // ≥2 indicadores, o cualquiera muy específico como 'ot' o 'tuberia'
+        if (hits >= 2 || celdas.some(c => c === 'ot' || c === 'tuberia')) return i;
+    }
+
+    // Fallback: primera fila con cualquier texto
+    for (let i = 0; i < Math.min(datos.length, 30); i++) {
+        if (!datos[i]) continue;
+        if (datos[i].some(cell => typeof cell === 'string' && cell.trim().length > 0)) return i;
     }
     return 0;
 }
@@ -967,6 +987,14 @@ function parsearNumero(valor) {
     return str.toUpperCase();
 }
 
+// Términos cortos o ambiguos que requieren match exacto para no colisionar
+// ej: 'tubo' ⊂ 'tuberia', 'ot' ⊂ 'nota'/'rotacion'
+const TERMINOS_EXACTOS = new Set(['tubo', 'ot', 'peso', 'color']);
+
+function _coincide(enc, busqueda) {
+    return TERMINOS_EXACTOS.has(busqueda) ? enc === busqueda : enc.includes(busqueda);
+}
+
 function detectarColumnasExcel(encabezados) {
     const mapeo = {};
     for (let i = 0; i < encabezados.length; i++) {
@@ -975,7 +1003,7 @@ function detectarColumnasExcel(encabezados) {
             if (mapeo[nombre] !== undefined) continue;
             if (config.buscar && config.buscar.length > 0) {
                 for (const busqueda of config.buscar) {
-                    if (enc.includes(busqueda)) { mapeo[nombre] = i; break; }
+                    if (_coincide(enc, busqueda)) { mapeo[nombre] = i; break; }
                 }
             }
         }
@@ -987,7 +1015,7 @@ function detectarColumnasExcel(encabezados) {
             if (mapeo[key] !== undefined) continue;
             if (colEsp.buscar && colEsp.buscar.length > 0) {
                 for (const busqueda of colEsp.buscar) {
-                    if (enc.includes(busqueda)) { mapeo[key] = i; break; }
+                    if (_coincide(enc, busqueda)) { mapeo[key] = i; break; }
                 }
             }
         }
@@ -1030,13 +1058,18 @@ async function cargarOrdenes(event) {
         const filaEncabezado = detectarFilaEncabezado(SistemaInventario.datosCrudosOrdenes);
         const encabezados = SistemaInventario.datosCrudosOrdenes[filaEncabezado];
         const mapeoColumnas = detectarColumnasExcel(encabezados);
+        // Fallback: si no hay columna 'medida' (ej. 'ANCHO REAL'), usar columna 'tubo' (ej. archivo AGASSI)
+        const colMedidaIdx = mapeoColumnas['medida'] !== undefined
+            ? mapeoColumnas['medida']
+            : mapeoColumnas['tubo'];
+
         SistemaInventario.ordenes = [];
         for (let i = filaEncabezado + 1; i < SistemaInventario.datosCrudosOrdenes.length; i++) {
             const fila = SistemaInventario.datosCrudosOrdenes[i];
-            if (!fila) continue;
-            const colMedida = mapeoColumnas['medida'];
-            const valor = colMedida !== undefined ? fila[colMedida] : null;
-            // Usar limpiarNumero para manejar tanto comas como puntos
+            // Saltar filas completamente vacías (null o array de solo nulls)
+            if (!fila || fila.every(c => c === null || c === undefined || String(c).trim() === '')) continue;
+            const valor = colMedidaIdx !== undefined ? fila[colMedidaIdx] : null;
+            // limpiarNumero maneja comas, puntos y decimales flotantes (ej. 126.99999999 → 127)
             const medidaNum = limpiarNumero(valor);
             if (medidaNum !== null && medidaNum > 0) {
                 const orden = { id: SistemaInventario.ordenes.length + 1, medida_mm: Math.round(medidaNum * 10), medida_cm: formatearNumero(medidaNum) };
