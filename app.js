@@ -1093,9 +1093,6 @@ async function cargarOrdenes(event) {
                         orden[nombre] = valorCelda;
                     }
                 }
-                // Re-sincronizar 'medida' con el valor ya calculado desde TUBO (colMedidaIdx),
-                // evitando que el loop anterior la sobreescriba con ANCHO REAL.
-                orden['medida'] = orden.medida_cm;
                 for (const colEsp of COLUMNAS_ESPECIFICAS) {
                     const idx = mapeoColumnas[colEsp.key];
                     if (idx !== undefined && idx !== null) orden[colEsp.key] = fila[idx];
@@ -1107,6 +1104,21 @@ async function cargarOrdenes(event) {
                 } else {
                     orden.cod = orden.codSec || 'TUBO-' + orden.id;
                 }
+
+                // --- OVERRIDE NUCLEAR DE MEDIDA ---
+                // orden['tubo'] ya fue seteado correctamente por el loop de COLUMNAS_ESPECIALES
+                // desde mapeoColumnas['tubo']. Lo usamos como fuente primaria de verdad.
+                const _valTubo = (orden['tubo'] !== null && orden['tubo'] !== undefined)
+                    ? limpiarNumero(orden['tubo'])
+                    : null;
+                const _medidaFinal = (_valTubo !== null && _valTubo > 0)
+                    ? _valTubo
+                    : limpiarNumero(orden['medida']);
+                orden['medida']   = _medidaFinal;
+                orden.medida_cm   = _medidaFinal;
+                orden.medida_mm   = Math.round(_medidaFinal * 10);
+                // --- FIN OVERRIDE ---
+
                 SistemaInventario.ordenes.push(orden);
             }
         }
