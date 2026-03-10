@@ -16,6 +16,7 @@ const SistemaInventario = {
     colmenas: [],
     catalogoReemplazos: {},
     catalogoColores: {},   // { "E01": "Aluminio", "E02": "Bronce", ... }
+    catalogoMedidas: {},   // { "E01": 578, "E02": 600, ... } medida real del tubo en cm
     logs: [],
     colmenasDisponibles: [],
     datosCrudosOrdenes: [],
@@ -360,6 +361,7 @@ function cargarSistema() {
         SistemaInventario.colmenas = datos.colmenas || [];
         SistemaInventario.catalogoReemplazos = datos.catalogoReemplazos || {};
         SistemaInventario.catalogoColores = datos.catalogoColores || {};
+        SistemaInventario.catalogoMedidas = datos.catalogoMedidas || {};
         SistemaInventario.logs = datos.logs || [];
         SistemaInventario.colmenasDisponibles = datos.colmenasDisponibles || [];
         SistemaInventario.datosCrudosOrdenes = datos.datosCrudosOrdenes || [];
@@ -1196,16 +1198,18 @@ async function cargarCatalogo(event) {
         const datos = await leerExcelCompleto(file);
         const filaEncabezado = detectarFilaEncabezado(datos);
         const encabezados = datos[filaEncabezado];
-        let colCodigo = -1, colReemplazo = -1, colColor = -1;
+        let colCodigo = -1, colReemplazo = -1, colColor = -1, colMedidaReal = -1;
         for (let i = 0; i < encabezados.length; i++) {
             const enc = String(encabezados[i] || '').trim().toUpperCase();
             if (enc.includes('CODIGO') || enc === 'COD') colCodigo = i;
             if (enc.includes('REEMPLAZ')) colReemplazo = i;
             if (enc === 'COLOR') colColor = i;  // Match exacto para evitar falsos positivos
+            if (enc.includes('MEDIDA REAL') || enc.includes('MEDIDA_REAL')) colMedidaReal = i;
         }
         if (colCodigo === -1 || colReemplazo === -1) { alert('No se encontraron columnas CODIGO y REEMPLAZO'); return; }
         SistemaInventario.catalogoReemplazos = {};
         SistemaInventario.catalogoColores = {};
+        SistemaInventario.catalogoMedidas = {};
         for (let i = filaEncabezado + 1; i < datos.length; i++) {
             const fila = datos[i];
             if (!fila) continue;
@@ -1219,12 +1223,18 @@ async function cargarCatalogo(event) {
                     const colorStr = String(fila[colColor]).trim();
                     if (colorStr) SistemaInventario.catalogoColores[codigoLimpio] = colorStr;
                 }
+                // Guardar medida real del tubo si la columna existe y tiene valor
+                if (colMedidaReal !== -1 && fila[colMedidaReal] !== null && fila[colMedidaReal] !== undefined) {
+                    const medida = limpiarNumero(fila[colMedidaReal]);
+                    if (medida > 0) SistemaInventario.catalogoMedidas[codigoLimpio] = medida;
+                }
             }
         }
         actualizarReemplazosEnOrdenes();
         actualizarTablaCatalogo();
         const nColores = Object.keys(SistemaInventario.catalogoColores).length;
-        log(`✓ Catálogo cargado: ${Object.keys(SistemaInventario.catalogoReemplazos).length} reemplazos, ${nColores} colores`, 'success');
+        const nMedidas = Object.keys(SistemaInventario.catalogoMedidas).length;
+        log(`✓ Catálogo cargado: ${Object.keys(SistemaInventario.catalogoReemplazos).length} reemplazos, ${nColores} colores, ${nMedidas} medidas reales`, 'success');
         document.getElementById('estadoCatalogo').textContent = `✓ ${Object.keys(SistemaInventario.catalogoReemplazos).length} reemplazos`;
         document.getElementById('estadoCatalogo').className = 'estado-archivo estado-ok';
         guardarSistema();
@@ -1962,8 +1972,13 @@ function ejecutarOptimizacion() {
             if (!resultado) {
                 // Buscar un serial disponible para este código
                 const serialDisponible = buscarSerialDisponible(codOrden);
-                
-                const sobranteNuevo = MM_TUBO_ORIGINAL - orden.medida_mm - MM_KERF;
+
+                // Medida dinámica del tubo nuevo desde catálogo (fallback a constante global)
+                const codBuscarMedida = String(codOrden || '').trim().toUpperCase();
+                const medidaNuevoCm = SistemaInventario.catalogoMedidas[codBuscarMedida] || (MM_TUBO_ORIGINAL / 10);
+                const medidaNuevoMm = medidaNuevoCm * 10;
+
+                const sobranteNuevo = medidaNuevoMm - orden.medida_mm - MM_KERF;
                 
                 // Calcular posición nueva ANTES de crear el resultado para poder incluirla en res.colmena
                 const posicionesOcupadas = new Set(SistemaInventario.colmenasHistorico.map(c => c.n_colmena));
@@ -1982,13 +1997,13 @@ function ejecutarOptimizacion() {
                         colmena: posicionNueva,
                         codigo_original: codOrden,
                         sobrante_cm: sobranteNuevo / 10,
-                        medida_origen: MM_TUBO_ORIGINAL / 10,
+                        medida_origen: medidaNuevoCm,
                         serial: serialDisponible
                     };
-                    
+
                     // Marcar el serial como ocupado en la lista local
                     marcarSerialComoOcupado(serialDisponible, orden.id);
-                    
+
                     log(`🏷️ Serial asignado: ${serialDisponible.codigo} - Lote: ${serialDisponible.lote} - Paquete: ${serialDisponible.paquete} - Serial: ${serialDisponible.serial}`, 'info');
                 } else {
                     resultado = {
@@ -1998,7 +2013,7 @@ function ejecutarOptimizacion() {
                         colmena: posicionNueva,
                         codigo_original: codOrden,
                         sobrante_cm: sobranteNuevo / 10,
-                        medida_origen: MM_TUBO_ORIGINAL / 10
+                        medida_origen: medidaNuevoCm
                     };
                     
                     log(`⚠️ No se encontró serial disponible para el código ${codOrden}`, 'warn');
@@ -2012,8 +2027,8 @@ function ejecutarOptimizacion() {
                 
                 SistemaInventario.colmenasHistorico.push({ 
                     n_colmena: posicionNueva, 
-                    medida_cm: MM_TUBO_ORIGINAL / 10, 
-                    medida_mm: MM_TUBO_ORIGINAL, 
+                    medida_cm: medidaNuevoCm,
+                    medida_mm: medidaNuevoMm,
                     cod: codigoTuboNuevo, 
                     codigo_original: codOrden, 
                     estado: 'usada', 
