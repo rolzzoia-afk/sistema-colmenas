@@ -1834,24 +1834,36 @@ function ejecutarOptimizacion() {
                 }
             } else if (clasificacion.estado !== 'prohibido') {
                 if (idxHistorico !== -1) { SistemaInventario.colmenasHistorico[idxHistorico].estado = 'usada'; SistemaInventario.colmenasHistorico[idxHistorico].origen = 'Orden ' + orden.id; }
-                
-                const idxInsertar = SistemaInventario.colmenasHistorico.findIndex(c => c.n_colmena === tuboEncontrado.colmena.n_colmena);
+
+                // CORRECCIÓN TRAZABILIDAD: buscar colmena destino correcta para el sobrante
+                const colmenaDestinoSobrante = buscarColmenaDisponibleConCodigo(tuboEncontrado.colmena.cod);
+                const nColmenaDestino = colmenaDestinoSobrante ? colmenaDestinoSobrante.n_colmena : tuboEncontrado.colmena.n_colmena;
+
+                // Guardar en resultado la colmena destino real del sobrante
+                resultado.colmena_sobrante = nColmenaDestino;
+
+                if (colmenaDestinoSobrante) {
+                    log(`📦 Sobrante reubicado en colmena ${nColmenaDestino} (código ${tuboEncontrado.colmena.cod}). Medida sobrante: ${sobrante / 10}cm`, 'info');
+                }
+
+                const idxInsertar = SistemaInventario.colmenasHistorico.findIndex(c => c.n_colmena === nColmenaDestino);
                 if (idxInsertar !== -1) {
-                SistemaInventario.colmenasHistorico.splice(idxInsertar + 1, 0, { 
-                    n_colmena: tuboEncontrado.colmena.n_colmena, 
-                    medida_cm: sobrante / 10, 
-                    medida_mm: sobrante, 
-                    cod: tuboEncontrado.colmena.cod, 
-                    codigo_original: tuboEncontrado.colmena.cod, 
-                    estado: 'disponible', 
-                    origen: 'Sobrante orden ' + orden.id, 
-                    posicionOriginal: tuboEncontrado.colmena.n_colmena,
+                SistemaInventario.colmenasHistorico.splice(idxInsertar + 1, 0, {
+                    n_colmena: nColmenaDestino,
+                    medida_cm: sobrante / 10,
+                    medida_mm: sobrante,
+                    cod: tuboEncontrado.colmena.cod,
+                    codigo_original: tuboEncontrado.colmena.cod,
+                    estado: 'disponible',
+                    origen: 'Sobrante orden ' + orden.id,
+                    posicionOriginal: nColmenaDestino,
                     serial: tuboEncontrado.colmena.serial || orden.serial || null,
                     fecha: tuboEncontrado.colmena.serial ? tuboEncontrado.colmena.serial.fecha : null
                 });
                 }
+                // Inyectar sobrante con la colmena destino correcta ANTES de push
                 SistemaInventario.colmenasDisponibles.push({
-                    n_colmena: tuboEncontrado.colmena.n_colmena,
+                    n_colmena: nColmenaDestino,
                     medida_mm: sobrante,
                     medida_cm: sobrante / 10,
                     cod: tuboEncontrado.colmena.cod,
@@ -1910,29 +1922,35 @@ function ejecutarOptimizacion() {
                             if (idxHistorico !== -1) { SistemaInventario.colmenasHistorico[idxHistorico].estado = 'usada'; SistemaInventario.colmenasHistorico[idxHistorico].origen = 'Orden ' + orden.id + ' (Reemplazo ' + codReemplazo + ')';  }
                             
                             const colmenaExistente = buscarColmenaDisponibleConCodigo(codReemplazo);
-                            
+                            // CORRECCIÓN TRAZABILIDAD: guardar colmena destino real del sobrante
+                            resultado.colmena_sobrante = colmenaExistente ? colmenaExistente.n_colmena : tuboReemplazo.colmena.n_colmena;
+
                             if (colmenaExistente) {
                                 log(`📦 Sobrante agregado como nueva fila para colmena ${colmenaExistente.n_colmena} (código ${codReemplazo}). Medida sobrante: ${sobrante / 10}cm`, 'info');
                                 const idxHistoricoExistente = SistemaInventario.colmenasHistorico.findIndex(c => c.n_colmena === colmenaExistente.n_colmena);
                                 if (idxHistoricoExistente !== -1) {
-                                    SistemaInventario.colmenasHistorico.splice(idxHistoricoExistente + 1, 0, { n_colmena: colmenaExistente.n_colmena, medida_cm: sobrante / 10, medida_mm: sobrante, cod: codReemplazo, codigo_original: tuboReemplazo.colmena.cod, estado: 'disponible', origen: 'Sobrante reemplazo orden ' + orden.id, posicionOriginal: colmenaExistente.n_colmena });
+                                    SistemaInventario.colmenasHistorico.splice(idxHistoricoExistente + 1, 0, { n_colmena: colmenaExistente.n_colmena, medida_cm: sobrante / 10, medida_mm: sobrante, cod: codReemplazo, codigo_original: tuboReemplazo.colmena.cod, estado: 'disponible', origen: 'Sobrante reemplazo orden ' + orden.id, posicionOriginal: colmenaExistente.n_colmena, serial: tuboReemplazo.colmena.serial || null, fecha: tuboReemplazo.colmena.serial ? tuboReemplazo.colmena.serial.fecha : null });
                                 }
+                                // CORRECCIÓN TRAZABILIDAD: sobrante con colmena destino correcta
                                 SistemaInventario.colmenasDisponibles.push({
                                     n_colmena: colmenaExistente.n_colmena,
                                     medida_mm: sobrante,
                                     medida_cm: sobrante / 10,
-                                    cod: codReemplazo
+                                    cod: codReemplazo,
+                                    serial: tuboReemplazo.colmena.serial || null
                                 });
                             } else {
                                 const idxInsertar = SistemaInventario.colmenasHistorico.findIndex(c => c.n_colmena === tuboReemplazo.colmena.n_colmena);
                                 if (idxInsertar !== -1) {
-                                    SistemaInventario.colmenasHistorico.splice(idxInsertar + 1, 0, { n_colmena: tuboReemplazo.colmena.n_colmena, medida_cm: sobrante / 10, medida_mm: sobrante, cod: tuboReemplazo.colmena.cod, codigo_original: tuboReemplazo.colmena.cod, estado: 'disponible', origen: 'Sobrante reemplazo orden ' + orden.id, posicionOriginal: tuboReemplazo.colmena.n_colmena });
+                                    SistemaInventario.colmenasHistorico.splice(idxInsertar + 1, 0, { n_colmena: tuboReemplazo.colmena.n_colmena, medida_cm: sobrante / 10, medida_mm: sobrante, cod: tuboReemplazo.colmena.cod, codigo_original: tuboReemplazo.colmena.cod, estado: 'disponible', origen: 'Sobrante reemplazo orden ' + orden.id, posicionOriginal: tuboReemplazo.colmena.n_colmena, serial: tuboReemplazo.colmena.serial || null, fecha: tuboReemplazo.colmena.serial ? tuboReemplazo.colmena.serial.fecha : null });
                                 }
+                                // CORRECCIÓN TRAZABILIDAD: sobrante con colmena destino correcta
                                 SistemaInventario.colmenasDisponibles.push({
                                     n_colmena: tuboReemplazo.colmena.n_colmena,
                                     medida_mm: sobrante,
                                     medida_cm: sobrante / 10,
-                                    cod: codReemplazo
+                                    cod: codReemplazo,
+                                    serial: tuboReemplazo.colmena.serial || null
                                 });
                             }
                             SistemaInventario.colmenasDisponibles.splice(tuboReemplazo.indice, 1);
@@ -2007,6 +2025,9 @@ function ejecutarOptimizacion() {
                 const clasificacion = evaluarSobrante(sobranteNuevo);
                 if (clasificacion.estado !== 'prohibido' && clasificacion.estado !== 'merma') {
                     const colmenaExistente = buscarColmenaDisponibleConCodigo(codigoTuboNuevo);
+                    // CORRECCIÓN TRAZABILIDAD: guardar colmena destino real del sobrante
+                    resultado.colmena_sobrante = colmenaExistente ? colmenaExistente.n_colmena : posicionNueva;
+
                     if (colmenaExistente) {
                         log(`📦 Sobrante agregado como nueva fila para colmena ${colmenaExistente.n_colmena} (código ${codigoTuboNuevo}). Medida sobrante: ${sobranteNuevo / 10}cm`, 'info');
                         const idxHistoricoExistente = SistemaInventario.colmenasHistorico.findIndex(c => c.n_colmena === colmenaExistente.n_colmena);
@@ -2161,7 +2182,7 @@ function exportarResultados() {
                     ord.ot || '-',
                     '',
                     'GUARDAR SOBRANTE',
-                    res.colmena || '-',
+                    res.colmena_sobrante || res.colmena || '-',
                     codigoPrincipal,
                     color,
                     res.sobrante_cm,
