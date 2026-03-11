@@ -1254,8 +1254,13 @@ async function cargarOrdenes(event) {
             if (ordenesDeEstaFila > 1) filasConMultiCorte++;
         }
 
-        // Ordenar por código para que el motor agrupe cortes del mismo material
-        SistemaInventario.ordenes.sort((a, b) => String(a.cod || '').localeCompare(String(b.cod || '')));
+        // Ordenar por OT y luego por Ubicación para agrupar como kit de armado
+        SistemaInventario.ordenes.sort((a, b) => {
+            const otA = String(a.ot || '');
+            const otB = String(b.ot || '');
+            if (otA !== otB) return otA.localeCompare(otB, undefined, { numeric: true });
+            return String(a.ubic || '').localeCompare(String(b.ubic || ''), undefined, { numeric: true });
+        });
         // Reasignar IDs secuenciales tras el ordenamiento
         SistemaInventario.ordenes.forEach((ord, idx) => { ord.id = idx + 1; });
 
@@ -1548,14 +1553,16 @@ function actualizarTablaColmenasResultado() {
     // TD siempre presente; vacío si el catálogo no está cargado
     tbody.innerHTML = SistemaInventario.resultadosOptimizacion.map(item => {
         const r = item.resultado;
+        const ord = SistemaInventario.ordenes.find(o => o.id === r.orden) || {};
         const color = r.color || obtenerColorDeCatalogo(r.codigo || r.codigo_original || '');
+        const accion = (ord.componente && ord.componente !== 'TUBO') ? `CORTAR ${ord.componente}` : 'CORTAR';
         return `<tr>
-            <td>${r.colmena || 'TUBO NUEVO'}</td>
+            <td>${r.colmena || r.nombreMaterialNuevo || 'TUBO NUEVO'}</td>
             <td>${r.codigo || '-'}</td>
             <td>${color}</td>
             <td>${r.medida_cm} cm</td>
             <td>${r.medida_origen !== undefined ? r.medida_origen + ' cm' : '-'}</td>
-            <td><span class="tag-accion">CORTAR</span></td>
+            <td><span class="tag-accion">${accion}</span></td>
         </tr>`;
     }).join('');
 }
@@ -2144,6 +2151,12 @@ function ejecutarOptimizacion() {
                     if (!posicionesOcupadas.has(pos)) { posicionNueva = pos; break; }
                 }
                 
+                // Nomenclatura dinámica: TUBO NUEVO vs CENEFA OVALADA NUEVA, etc.
+                let nombreMaterialNuevo = 'TUBO NUEVO';
+                if (orden.componente && orden.componente !== 'TUBO') {
+                    nombreMaterialNuevo = `${orden.componente} NUEVO`;
+                }
+
                 // Crear el resultado con información del serial y colmena asignada
                 if (serialDisponible) {
                     resultado = {
@@ -2154,7 +2167,8 @@ function ejecutarOptimizacion() {
                         codigo_original: codOrden,
                         sobrante_cm: sobranteNuevo / 10,
                         medida_origen: medidaNuevoCm,
-                        serial: serialDisponible
+                        serial: serialDisponible,
+                        nombreMaterialNuevo: nombreMaterialNuevo
                     };
 
                     // Marcar el serial como ocupado en la lista local
@@ -2169,9 +2183,10 @@ function ejecutarOptimizacion() {
                         colmena: posicionNueva,
                         codigo_original: codOrden,
                         sobrante_cm: sobranteNuevo / 10,
-                        medida_origen: medidaNuevoCm
+                        medida_origen: medidaNuevoCm,
+                        nombreMaterialNuevo: nombreMaterialNuevo
                     };
-                    
+
                     log(`⚠️ No se encontró serial disponible para el código ${codOrden}`, 'warn');
                 }
                 
@@ -2313,12 +2328,18 @@ function exportarResultados() {
         // res.color ya se setea en ejecutarOptimizacion; fallback a lookup directo
         const color = res.color || obtenerColorDeCatalogo(codigoPrincipal);
 
+        // Acción descriptiva según componente
+        let accionCortar = 'CORTAR';
+        if (ord.componente && ord.componente !== 'TUBO') {
+            accionCortar = `CORTAR ${ord.componente}`;
+        }
+
         // Fila CORTAR
         datosExcel.push([
             ord.ot || '-',
             ord.ubic || '-',
-            'CORTAR',
-            res.fuente === 'tubo_nuevo' ? 'TUBO NUEVO' : (res.colmena || '-'),
+            accionCortar,
+            res.fuente === 'tubo_nuevo' ? (res.nombreMaterialNuevo || 'TUBO NUEVO') : (res.colmena || '-'),
             codigoPrincipal,
             color,
             res.medida_cm,
