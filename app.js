@@ -24,7 +24,10 @@ const SistemaInventario = {
     colmenasHistorico: [],
     mermas: [],
     seriales: [],
-    historialMermas: []
+    historialMermas: [],
+    colmenaCruda: [],          // Copia inmutable de colmenas al cargar Excel
+    ordenesCrudas: [],         // Copia inmutable de órdenes antes de optimizar
+    overridesNuevos: {}        // Cola de medidas reales rectificadas: { 'E02': [579.2, 579.5] }
 };
 
 // Variables globales para manejo de colmena desde Firebase
@@ -1187,6 +1190,8 @@ async function cargarColmenas(event) {
         // Marcar como manual y actualizar indicador
         usandoColmenaManual = true;
         actualizarIndicadorFuente(true);
+        // Guardar copia inmutable de colmenas para poder recalcular sin recargar Excel
+        SistemaInventario.colmenaCruda = JSON.parse(JSON.stringify(SistemaInventario.colmenas));
         guardarSistema();
     } catch (e) { alert('Error: ' + e.message); }
 }
@@ -1771,6 +1776,11 @@ function ejecutarOptimizacion() {
 
     if (SistemaInventario.ordenes.length === 0 || colmenasAUsar.length === 0) { alert('Cargue órdenes y colmenas'); return; }
 
+    // Guardar copia inmutable de órdenes para poder recalcular sin recargar Excel
+    if (SistemaInventario.ordenesCrudas.length === 0) {
+        SistemaInventario.ordenesCrudas = JSON.parse(JSON.stringify(SistemaInventario.ordenes));
+    }
+
     log(`ℹ️ Fuente de colmenas: ${usandoColmenaManual ? 'Archivo manual' : 'Firebase (sincronizado)'}`, 'info');
 
     document.getElementById('logs').innerHTML = '';
@@ -1975,7 +1985,14 @@ function ejecutarOptimizacion() {
 
                 // Medida dinámica del tubo nuevo desde catálogo (fallback a constante global)
                 const codBuscarMedida = String(codOrden || '').trim().toUpperCase();
-                const medidaNuevoCm = SistemaInventario.catalogoMedidas[codBuscarMedida] || (MM_TUBO_ORIGINAL / 10);
+                let medidaNuevoCm = SistemaInventario.catalogoMedidas[codBuscarMedida] || (MM_TUBO_ORIGINAL / 10);
+
+                // Rectificación al vuelo: si hay un override de medida real, usarlo
+                if (SistemaInventario.overridesNuevos[codBuscarMedida] && SistemaInventario.overridesNuevos[codBuscarMedida].length > 0) {
+                    medidaNuevoCm = SistemaInventario.overridesNuevos[codBuscarMedida].shift();
+                    log(`📐 Rectificación aplicada para ${codBuscarMedida}: ${medidaNuevoCm} cm (medida real del tubo)`, 'info');
+                }
+
                 const medidaNuevoMm = medidaNuevoCm * 10;
 
                 const sobranteNuevo = medidaNuevoMm - orden.medida_mm - MM_KERF;
@@ -2359,3 +2376,74 @@ function cerrarSesion() {
 }
 
 window.cerrarSesion = cerrarSesion;
+
+// ====== RECTIFICACIÓN AL VUELO DE TUBOS NUEVOS ======
+
+function recalcularPlan() {
+    // Restaurar inventario y órdenes desde las copias crudas
+    if (SistemaInventario.colmenaCruda.length > 0) {
+        SistemaInventario.colmenas = JSON.parse(JSON.stringify(SistemaInventario.colmenaCruda));
+    }
+    if (SistemaInventario.ordenesCrudas.length > 0) {
+        SistemaInventario.ordenes = JSON.parse(JSON.stringify(SistemaInventario.ordenesCrudas));
+    }
+
+    // Resetear seriales usados para que se reasignen desde cero
+    SistemaInventario.seriales.forEach(s => { s.ocupado = false; s.asignadoA = null; });
+
+    // Limpiar estado previo
+    SistemaInventario.colmenasHistorico = [];
+    SistemaInventario.resultadosOptimizacion = [];
+    SistemaInventario.mermas = [];
+    SistemaInventario.logs = [];
+
+    // Re-ejecutar optimización con los overrides activos
+    ejecutarOptimizacion();
+
+    log('📐 Plan recalculado con medidas rectificadas', 'success');
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+    const btnRectificar = document.getElementById('btnRectificar');
+    if (btnRectificar) {
+        btnRectificar.addEventListener('click', function() {
+            const input = prompt(
+                'Ingrese código y medida real separados por coma (ej. E02,579.2).\n' +
+                'Si son varios, sepárelos por punto y coma (ej. E02,579.2 ; E02,579.5 ; E53,598).'
+            );
+            if (!input || input.trim() === '') return;
+
+            // Limpiar overrides previos
+            SistemaInventario.overridesNuevos = {};
+
+            const pares = input.split(';');
+            let totalOverrides = 0;
+            for (const par of pares) {
+                const partes = par.split(',').map(s => s.trim());
+                if (partes.length < 2) continue;
+                const codigo = partes[0].toUpperCase();
+                const medida = parseFloat(partes[1].replace(',', '.'));
+                if (isNaN(medida) || medida <= 0) continue;
+
+                if (!SistemaInventario.overridesNuevos[codigo]) {
+                    SistemaInventario.overridesNuevos[codigo] = [];
+                }
+                SistemaInventario.overridesNuevos[codigo].push(medida);
+                totalOverrides++;
+            }
+
+            if (totalOverrides === 0) {
+                alert('No se detectaron rectificaciones válidas. Formato: E02,579.2 ; E53,598');
+                return;
+            }
+
+            const resumen = Object.entries(SistemaInventario.overridesNuevos)
+                .map(([cod, medidas]) => `${cod}: ${medidas.join(', ')} cm`)
+                .join('\n');
+
+            if (confirm(`Se aplicarán ${totalOverrides} rectificación(es):\n\n${resumen}\n\n¿Recalcular el plan?`)) {
+                recalcularPlan();
+            }
+        });
+    }
+});
