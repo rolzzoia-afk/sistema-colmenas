@@ -27,6 +27,7 @@ const SistemaInventario = {
     historialMermas: [],
     colmenaCruda: [],          // Copia inmutable de colmenas al cargar Excel
     ordenesCrudas: [],         // Copia inmutable de órdenes antes de optimizar
+    serialesCrudos: [],        // Copia inmutable de seriales antes de optimizar
     overridesNuevos: {}        // Cola de medidas reales rectificadas: { 'E02': [579.2, 579.5] }
 };
 
@@ -1776,9 +1777,12 @@ function ejecutarOptimizacion() {
 
     if (SistemaInventario.ordenes.length === 0 || colmenasAUsar.length === 0) { alert('Cargue órdenes y colmenas'); return; }
 
-    // Guardar copia inmutable de órdenes para poder recalcular sin recargar Excel
+    // Guardar copias inmutables para poder recalcular sin recargar Excel
     if (SistemaInventario.ordenesCrudas.length === 0) {
         SistemaInventario.ordenesCrudas = JSON.parse(JSON.stringify(SistemaInventario.ordenes));
+    }
+    if (SistemaInventario.serialesCrudos.length === 0 && SistemaInventario.seriales.length > 0) {
+        SistemaInventario.serialesCrudos = JSON.parse(JSON.stringify(SistemaInventario.seriales));
     }
 
     log(`ℹ️ Fuente de colmenas: ${usandoColmenaManual ? 'Archivo manual' : 'Firebase (sincronizado)'}`, 'info');
@@ -2388,8 +2392,17 @@ function recalcularPlan() {
         SistemaInventario.ordenes = JSON.parse(JSON.stringify(SistemaInventario.ordenesCrudas));
     }
 
-    // Resetear seriales usados para que se reasignen desde cero
-    SistemaInventario.seriales.forEach(s => { s.ocupado = false; s.asignadoA = null; });
+    // Restaurar seriales al estado original (todos 'disponible', sin ordenId/fechaUso)
+    if (SistemaInventario.serialesCrudos.length > 0) {
+        SistemaInventario.seriales = JSON.parse(JSON.stringify(SistemaInventario.serialesCrudos));
+    } else {
+        // Fallback: resetear campos manualmente si no hay copia cruda
+        SistemaInventario.seriales.forEach(s => {
+            s.estado = 'disponible';
+            delete s.ordenId;
+            delete s.fechaUso;
+        });
+    }
 
     // Limpiar estado previo
     SistemaInventario.colmenasHistorico = [];
