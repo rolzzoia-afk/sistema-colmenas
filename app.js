@@ -1094,7 +1094,8 @@ async function cargarOrdenes(event) {
             'PERFIL [CORTINA VERTICAL]': 'PERFIL CORTINA VERTICAL',
             'VARILLA [CORTINA VERTICAL]': 'VARILLA CORTINA VERTICAL',
             'PERFIL (IZQ) INT': 'PERFIL IZQUIERDO INTERNO',
-            'PERFIL (DER) INT': 'PERFIL DERECHO INTERNO'
+            'PERFIL (DER) INT': 'PERFIL DERECHO INTERNO',
+            'PESO U': 'PESO INFERIOR DE DÚO LÁGRIMA'
         };
 
         // Mapa explícito: componente → columna de color que le corresponde
@@ -1211,6 +1212,17 @@ async function cargarOrdenes(event) {
                         colorDeseado = valColor ? String(valColor).toUpperCase().trim() : '';
                     }
 
+                    // Excepción dura: PESO INTERNO siempre es E13, sin importar color
+                    if (nombreCol === 'PESO INTERNO') {
+                        orden.cod = 'E13';
+                        orden.codigoExtraido = 'E13';
+                        orden.reemplazo = SistemaInventario.catalogoReemplazos['E13'] || null;
+                        orden.tuberia = 'PESO INTERNO';
+                        SistemaInventario.ordenes.push(orden);
+                        ordenesDeEstaFila++;
+                        continue;
+                    }
+
                     // Traducir nombre de columna al nombre exacto del catálogo
                     const nombreCatalogo = (MAPA_NOMBRES_CATALOGO[nombreCol] || nombreCol).toUpperCase().trim();
                     const llaveAcc = `${nombreCatalogo}|${colorDeseado}`;
@@ -1222,16 +1234,13 @@ async function cargarOrdenes(event) {
                         }
                     }
 
-                    if (codigoAccesorio) {
-                        orden.cod = codigoAccesorio;
-                        orden.codigoExtraido = codigoAccesorio;
-                        orden.reemplazo = SistemaInventario.catalogoReemplazos[codigoAccesorio] || null;
-                    } else {
-                        // Fallback: código genérico con nombre de componente
-                        orden.cod = `ACC-${nombreCol.replace(/[\s\[\]()]/g, '')}`;
-                        orden.codigoExtraido = null;
-                        orden.reemplazo = null;
+                    if (!codigoAccesorio) {
+                        // Hard fail: no inventar códigos, saltar hasta que el usuario mapee en el catálogo
+                        continue;
                     }
+                    orden.cod = codigoAccesorio;
+                    orden.codigoExtraido = codigoAccesorio;
+                    orden.reemplazo = SistemaInventario.catalogoReemplazos[codigoAccesorio] || null;
 
                     // Sobrescribir propiedades heredadas para dar contexto al operario
                     orden.tuberia = `${nombreCol} - ${colorDeseado || 'SIN COLOR'}`;
@@ -1244,6 +1253,11 @@ async function cargarOrdenes(event) {
 
             if (ordenesDeEstaFila > 1) filasConMultiCorte++;
         }
+
+        // Ordenar por código para que el motor agrupe cortes del mismo material
+        SistemaInventario.ordenes.sort((a, b) => String(a.cod || '').localeCompare(String(b.cod || '')));
+        // Reasignar IDs secuenciales tras el ordenamiento
+        SistemaInventario.ordenes.forEach((ord, idx) => { ord.id = idx + 1; });
 
         actualizarTablaOrdenes();
         document.getElementById('estadoOrdenes').textContent = `✓ ${SistemaInventario.ordenes.length} órdenes`;
