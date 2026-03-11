@@ -1060,209 +1060,217 @@ function actualizarReemplazosEnOrdenes() {
     if (actualizados > 0) { log(`✓ Se actualizaron ${actualizados} reemplazos en las órdenes`, 'info'); actualizarTablaOrdenes(); }
 }
 
+// ─── Función reutilizable: expande datosCrudosOrdenes en órdenes multi-corte ───
+function expandirOrdenesDesdeExcel() {
+    const filaEncabezado = detectarFilaEncabezado(SistemaInventario.datosCrudosOrdenes);
+    const encabezados = SistemaInventario.datosCrudosOrdenes[filaEncabezado];
+    const mapeoColumnas = detectarColumnasExcel(encabezados);
+
+    // Detección dinámica de columna TUBO
+    const _normH = h => String(h || '').replace(/[\s\u00A0\t]+/g, ' ').trim().toUpperCase();
+    let idxTubo = encabezados.findIndex(h => _normH(h) === 'TUBO');
+    if (idxTubo === -1) {
+        idxTubo = encabezados.findIndex(h => {
+            const n = _normH(h);
+            return n.includes('TUBO') && !n.includes('TUBERIA');
+        });
+    }
+    console.log("📍 Columna TUBO detectada dinámicamente en índice:", idxTubo);
+    log(`🔍 Columna TUBO en índice: ${idxTubo !== -1 ? idxTubo : 'NO ENCONTRADA (usando fallback)'}`, 'info');
+
+    // ─── MULTI-CORTE: Columnas de componentes a procesar ───
+    const COLUMNAS_CORTE = [
+        'TUBO', 'PESO', 'CENEFA OVALADA', 'PESO U', 'PESO INTERNO',
+        'PLETINA', 'PERFIL [CORTINA VERTICAL]', 'VARILLA [CORTINA VERTICAL]',
+        'PERFIL (IZQ) INT', 'PERFIL (DER) INT', 'PERFIL BASE',
+        'CENEFA DELANTERA', 'CENEFA TRASERA', 'PESO SOFT LIGHT'
+    ];
+
+    // Traductor: nombre columna en Libro4 → nombre exacto en el Catálogo
+    const MAPA_NOMBRES_CATALOGO = {
+        'PERFIL [CORTINA VERTICAL]': 'PERFIL CORTINA VERTICAL',
+        'VARILLA [CORTINA VERTICAL]': 'VARILLA CORTINA VERTICAL',
+        'PERFIL (IZQ) INT': 'PERFIL IZQUIERDO INTERNO',
+        'PERFIL (DER) INT': 'PERFIL DERECHO INTERNO',
+        'PESO U': 'PESO INFERIOR DE DÚO LÁGRIMA'
+    };
+
+    // Mapa explícito: componente → columna de color que le corresponde
+    const MAPA_COLUMNAS_COLOR = {
+        'CENEFA OVALADA': 'COLOR ACCESORIOS',
+        'PESO U': 'COLOR ACCESORIOS',
+        'PESO INTERNO': 'COLOR ACCESORIOS',
+        'PLETINA': 'COLOR ACCESORIOS',
+        'PERFIL [CORTINA VERTICAL]': 'COLOR PERFIL',
+        'VARILLA [CORTINA VERTICAL]': 'COLOR PERFIL',
+        'PERFIL (IZQ) INT': 'COLOR PERFIL',
+        'PERFIL (DER) INT': 'COLOR PERFIL',
+        'PERFIL BASE': 'COLOR PERFIL',
+        'CENEFA DELANTERA': 'COLOR PERFIL',
+        'CENEFA TRASERA': 'COLOR PERFIL',
+        'PESO SOFT LIGHT': 'COLOR PESO INF. SOFT LIGHT'
+    };
+
+    // Mapear cada nombre de COLUMNAS_CORTE a su índice real en el Excel
+    const idxCorte = {};
+    for (const nombreCol of COLUMNAS_CORTE) {
+        const idx = encabezados.findIndex(h => _normH(h) === nombreCol);
+        if (idx !== -1) idxCorte[nombreCol] = idx;
+    }
+    const columnasCorteDetectadas = Object.keys(idxCorte);
+    log(`🔧 Multi-corte: ${columnasCorteDetectadas.length} columnas detectadas: ${columnasCorteDetectadas.join(', ')}`, 'info');
+
+    // Detectar columnas de color únicas referenciadas por MAPA_COLUMNAS_COLOR
+    const nombresColorUnicos = [...new Set(Object.values(MAPA_COLUMNAS_COLOR))];
+    const idxColumnaColor = {};
+    for (const nombreColor of nombresColorUnicos) {
+        let idx = encabezados.findIndex(h => _normH(h) === nombreColor);
+        if (idx === -1) idx = encabezados.findIndex(h => _normH(h).includes(nombreColor));
+        if (idx !== -1) idxColumnaColor[nombreColor] = idx;
+    }
+    log(`🎨 Columnas de color detectadas: ${Object.keys(idxColumnaColor).join(', ') || 'ninguna'}`, 'info');
+
+    SistemaInventario.ordenes = [];
+    let filasConMultiCorte = 0;
+
+    for (let i = filaEncabezado + 1; i < SistemaInventario.datosCrudosOrdenes.length; i++) {
+        const fila = SistemaInventario.datosCrudosOrdenes[i];
+        if (!fila || fila.every(c => c === null || c === undefined || String(c).trim() === '')) continue;
+
+        // Extraer datos compartidos de la fila (OT, UBIC, TUBERIA, COLOR, etc.)
+        const datosCompartidos = {};
+        for (const [nombre, config] of Object.entries(COLUMNAS_ESPECIALES)) {
+            const idx = mapeoColumnas[nombre];
+            if (idx !== undefined && idx !== null) {
+                let valorCelda = fila[idx];
+                if (config.esNumero) valorCelda = formatearNumero(valorCelda);
+                datosCompartidos[nombre] = valorCelda;
+            }
+        }
+        for (const colEsp of COLUMNAS_ESPECIFICAS) {
+            const idx = mapeoColumnas[colEsp.key];
+            if (idx !== undefined && idx !== null) datosCompartidos[colEsp.key] = fila[idx];
+        }
+
+        // Código del tubo (de TUBERIA)
+        let codTubo = null;
+        if (datosCompartidos.tuberia) {
+            codTubo = extraerCodigoDesdeTuberia(datosCompartidos.tuberia);
+        }
+
+        let ordenesDeEstaFila = 0;
+
+        // ─── Iterar sobre cada columna de corte ───
+        for (const nombreCol of COLUMNAS_CORTE) {
+            const idxCol = idxCorte[nombreCol];
+            if (idxCol === undefined) continue; // columna no existe en este Excel
+
+            const valorCrudo = fila[idxCol];
+            // Protección: ignorar celdas vacías, texto puro o valores no numéricos
+            if (valorCrudo === undefined || valorCrudo === null || valorCrudo === '') continue;
+            const medidaNum = limpiarNumero(valorCrudo);
+            if (isNaN(medidaNum) || medidaNum <= 0) continue;
+
+            const orden = {
+                id: SistemaInventario.ordenes.length + 1,
+                medida_mm: Math.round(medidaNum * 10),
+                medida_cm: formatearNumero(medidaNum),
+                componente: nombreCol // Trazabilidad: qué componente es
+            };
+
+            // Copiar datos compartidos de la fila
+            Object.assign(orden, datosCompartidos);
+
+            if (nombreCol === 'TUBO') {
+                // ─── Lógica original del TUBO ───
+                if (codTubo) {
+                    orden.codigoExtraido = codTubo;
+                    orden.reemplazo = SistemaInventario.catalogoReemplazos[codTubo] || null;
+                    orden.cod = codTubo || orden.codSec || 'TUBO-' + orden.id;
+                } else {
+                    orden.cod = orden.codSec || 'TUBO-' + orden.id;
+                }
+
+                // Override nuclear de medida para TUBO
+                const _valTubo = idxTubo !== -1 ? limpiarNumero(fila[idxTubo]) : null;
+                const _medidaFinal = (_valTubo !== null && _valTubo > 0)
+                    ? _valTubo
+                    : limpiarNumero(orden['medida']);
+                orden['medida'] = _medidaFinal;
+                orden.medida_cm = _medidaFinal;
+                orden.medida_mm = Math.round(_medidaFinal * 10);
+            } else {
+                // ─── Lógica de accesorios (no-TUBO) ───
+                // Buscar color usando el mapa explícito componente → columna de color
+                const nombreColumnaColor = MAPA_COLUMNAS_COLOR[nombreCol];
+                let colorDeseado = '';
+                if (nombreColumnaColor && idxColumnaColor[nombreColumnaColor] !== undefined) {
+                    const valColor = fila[idxColumnaColor[nombreColumnaColor]];
+                    colorDeseado = valColor ? String(valColor).toUpperCase().trim() : '';
+                }
+
+                // Excepción dura: PESO INTERNO siempre es E13, sin importar color
+                if (nombreCol === 'PESO INTERNO') {
+                    orden.cod = 'E13';
+                    orden.codigoExtraido = 'E13';
+                    orden.reemplazo = SistemaInventario.catalogoReemplazos['E13'] || null;
+                    orden.tuberia = 'PESO INTERNO';
+                    SistemaInventario.ordenes.push(orden);
+                    ordenesDeEstaFila++;
+                    continue;
+                }
+
+                // Traducir nombre de columna al nombre exacto del catálogo
+                const nombreCatalogo = (MAPA_NOMBRES_CATALOGO[nombreCol] || nombreCol).toUpperCase().trim();
+                const llaveAcc = `${nombreCatalogo}|${colorDeseado}`;
+                let codigoAccesorio = null;
+                if (colorDeseado) {
+                    codigoAccesorio = SistemaInventario.catalogoAccesorios[llaveAcc] || null;
+                    if (!codigoAccesorio) {
+                        console.warn(`⚠️ Accesorio no encontrado en catálogo: ${llaveAcc}`);
+                    }
+                }
+
+                if (!codigoAccesorio) {
+                    // Hard fail: no inventar códigos, saltar hasta que el usuario mapee en el catálogo
+                    continue;
+                }
+                orden.cod = codigoAccesorio;
+                orden.codigoExtraido = codigoAccesorio;
+                orden.reemplazo = SistemaInventario.catalogoReemplazos[codigoAccesorio] || null;
+
+                // Sobrescribir propiedades heredadas para dar contexto al operario
+                orden.tuberia = `${nombreCol} - ${colorDeseado || 'SIN COLOR'}`;
+                // codSec se mantiene del datosCompartidos (sistema de cortina original)
+            }
+
+            SistemaInventario.ordenes.push(orden);
+            ordenesDeEstaFila++;
+        }
+
+        if (ordenesDeEstaFila > 1) filasConMultiCorte++;
+    }
+
+    // Ordenar por OT y luego por Ubicación para agrupar como kit de armado
+    SistemaInventario.ordenes.sort((a, b) => {
+        const otA = String(a.ot || '');
+        const otB = String(b.ot || '');
+        if (otA !== otB) return otA.localeCompare(otB, undefined, { numeric: true });
+        return String(a.ubic || '').localeCompare(String(b.ubic || ''), undefined, { numeric: true });
+    });
+    // Reasignar IDs secuenciales tras el ordenamiento
+    SistemaInventario.ordenes.forEach((ord, idx) => { ord.id = idx + 1; });
+
+    return filasConMultiCorte;
+}
+
 async function cargarOrdenes(event) {
     const file = event.target.files[0];
     if (!file) return;
     try {
         SistemaInventario.datosCrudosOrdenes = await leerExcelCompleto(file);
-        const filaEncabezado = detectarFilaEncabezado(SistemaInventario.datosCrudosOrdenes);
-        const encabezados = SistemaInventario.datosCrudosOrdenes[filaEncabezado];
-        const mapeoColumnas = detectarColumnasExcel(encabezados);
 
-        // Detección dinámica de columna TUBO: búsqueda por nombre en encabezados crudos.
-        const _normH = h => String(h || '').replace(/[\s\u00A0\t]+/g, ' ').trim().toUpperCase();
-        let idxTubo = encabezados.findIndex(h => _normH(h) === 'TUBO');
-        if (idxTubo === -1) {
-            idxTubo = encabezados.findIndex(h => {
-                const n = _normH(h);
-                return n.includes('TUBO') && !n.includes('TUBERIA');
-            });
-        }
-        console.log("📍 Columna TUBO detectada dinámicamente en índice:", idxTubo);
-        log(`🔍 Columna TUBO en índice: ${idxTubo !== -1 ? idxTubo : 'NO ENCONTRADA (usando fallback)'}`, 'info');
-
-        // ─── MULTI-CORTE: Columnas de componentes a procesar ───
-        const COLUMNAS_CORTE = [
-            'TUBO', 'PESO', 'CENEFA OVALADA', 'PESO U', 'PESO INTERNO',
-            'PLETINA', 'PERFIL [CORTINA VERTICAL]', 'VARILLA [CORTINA VERTICAL]',
-            'PERFIL (IZQ) INT', 'PERFIL (DER) INT', 'PERFIL BASE',
-            'CENEFA DELANTERA', 'CENEFA TRASERA', 'PESO SOFT LIGHT'
-        ];
-
-        // Traductor: nombre columna en Libro4 → nombre exacto en el Catálogo
-        const MAPA_NOMBRES_CATALOGO = {
-            'PERFIL [CORTINA VERTICAL]': 'PERFIL CORTINA VERTICAL',
-            'VARILLA [CORTINA VERTICAL]': 'VARILLA CORTINA VERTICAL',
-            'PERFIL (IZQ) INT': 'PERFIL IZQUIERDO INTERNO',
-            'PERFIL (DER) INT': 'PERFIL DERECHO INTERNO',
-            'PESO U': 'PESO INFERIOR DE DÚO LÁGRIMA'
-        };
-
-        // Mapa explícito: componente → columna de color que le corresponde
-        const MAPA_COLUMNAS_COLOR = {
-            'CENEFA OVALADA': 'COLOR ACCESORIOS',
-            'PESO U': 'COLOR ACCESORIOS',
-            'PESO INTERNO': 'COLOR ACCESORIOS',
-            'PLETINA': 'COLOR ACCESORIOS',
-            'PERFIL [CORTINA VERTICAL]': 'COLOR PERFIL',
-            'VARILLA [CORTINA VERTICAL]': 'COLOR PERFIL',
-            'PERFIL (IZQ) INT': 'COLOR PERFIL',
-            'PERFIL (DER) INT': 'COLOR PERFIL',
-            'PERFIL BASE': 'COLOR PERFIL',
-            'CENEFA DELANTERA': 'COLOR PERFIL',
-            'CENEFA TRASERA': 'COLOR PERFIL',
-            'PESO SOFT LIGHT': 'COLOR PESO INF. SOFT LIGHT'
-        };
-
-        // Mapear cada nombre de COLUMNAS_CORTE a su índice real en el Excel
-        const idxCorte = {};
-        for (const nombreCol of COLUMNAS_CORTE) {
-            const idx = encabezados.findIndex(h => _normH(h) === nombreCol);
-            if (idx !== -1) idxCorte[nombreCol] = idx;
-        }
-        const columnasCorteDetectadas = Object.keys(idxCorte);
-        log(`🔧 Multi-corte: ${columnasCorteDetectadas.length} columnas detectadas: ${columnasCorteDetectadas.join(', ')}`, 'info');
-
-        // Detectar columnas de color únicas referenciadas por MAPA_COLUMNAS_COLOR
-        const nombresColorUnicos = [...new Set(Object.values(MAPA_COLUMNAS_COLOR))];
-        const idxColumnaColor = {};
-        for (const nombreColor of nombresColorUnicos) {
-            let idx = encabezados.findIndex(h => _normH(h) === nombreColor);
-            if (idx === -1) idx = encabezados.findIndex(h => _normH(h).includes(nombreColor));
-            if (idx !== -1) idxColumnaColor[nombreColor] = idx;
-        }
-        log(`🎨 Columnas de color detectadas: ${Object.keys(idxColumnaColor).join(', ') || 'ninguna'}`, 'info');
-
-        SistemaInventario.ordenes = [];
-        let filasConMultiCorte = 0;
-
-        for (let i = filaEncabezado + 1; i < SistemaInventario.datosCrudosOrdenes.length; i++) {
-            const fila = SistemaInventario.datosCrudosOrdenes[i];
-            if (!fila || fila.every(c => c === null || c === undefined || String(c).trim() === '')) continue;
-
-            // Extraer datos compartidos de la fila (OT, UBIC, TUBERIA, COLOR, etc.)
-            const datosCompartidos = {};
-            for (const [nombre, config] of Object.entries(COLUMNAS_ESPECIALES)) {
-                const idx = mapeoColumnas[nombre];
-                if (idx !== undefined && idx !== null) {
-                    let valorCelda = fila[idx];
-                    if (config.esNumero) valorCelda = formatearNumero(valorCelda);
-                    datosCompartidos[nombre] = valorCelda;
-                }
-            }
-            for (const colEsp of COLUMNAS_ESPECIFICAS) {
-                const idx = mapeoColumnas[colEsp.key];
-                if (idx !== undefined && idx !== null) datosCompartidos[colEsp.key] = fila[idx];
-            }
-
-            // Código del tubo (de TUBERIA)
-            let codTubo = null;
-            if (datosCompartidos.tuberia) {
-                codTubo = extraerCodigoDesdeTuberia(datosCompartidos.tuberia);
-            }
-
-            let ordenesDeEstaFila = 0;
-
-            // ─── Iterar sobre cada columna de corte ───
-            for (const nombreCol of COLUMNAS_CORTE) {
-                const idxCol = idxCorte[nombreCol];
-                if (idxCol === undefined) continue; // columna no existe en este Excel
-
-                const valorCrudo = fila[idxCol];
-                // Protección: ignorar celdas vacías, texto puro o valores no numéricos
-                if (valorCrudo === undefined || valorCrudo === null || valorCrudo === '') continue;
-                const medidaNum = limpiarNumero(valorCrudo);
-                if (isNaN(medidaNum) || medidaNum <= 0) continue;
-
-                const orden = {
-                    id: SistemaInventario.ordenes.length + 1,
-                    medida_mm: Math.round(medidaNum * 10),
-                    medida_cm: formatearNumero(medidaNum),
-                    componente: nombreCol // Trazabilidad: qué componente es
-                };
-
-                // Copiar datos compartidos de la fila
-                Object.assign(orden, datosCompartidos);
-
-                if (nombreCol === 'TUBO') {
-                    // ─── Lógica original del TUBO ───
-                    if (codTubo) {
-                        orden.codigoExtraido = codTubo;
-                        orden.reemplazo = SistemaInventario.catalogoReemplazos[codTubo] || null;
-                        orden.cod = codTubo || orden.codSec || 'TUBO-' + orden.id;
-                    } else {
-                        orden.cod = orden.codSec || 'TUBO-' + orden.id;
-                    }
-
-                    // Override nuclear de medida para TUBO
-                    const _valTubo = idxTubo !== -1 ? limpiarNumero(fila[idxTubo]) : null;
-                    const _medidaFinal = (_valTubo !== null && _valTubo > 0)
-                        ? _valTubo
-                        : limpiarNumero(orden['medida']);
-                    orden['medida'] = _medidaFinal;
-                    orden.medida_cm = _medidaFinal;
-                    orden.medida_mm = Math.round(_medidaFinal * 10);
-                } else {
-                    // ─── Lógica de accesorios (no-TUBO) ───
-                    // Buscar color usando el mapa explícito componente → columna de color
-                    const nombreColumnaColor = MAPA_COLUMNAS_COLOR[nombreCol];
-                    let colorDeseado = '';
-                    if (nombreColumnaColor && idxColumnaColor[nombreColumnaColor] !== undefined) {
-                        const valColor = fila[idxColumnaColor[nombreColumnaColor]];
-                        colorDeseado = valColor ? String(valColor).toUpperCase().trim() : '';
-                    }
-
-                    // Excepción dura: PESO INTERNO siempre es E13, sin importar color
-                    if (nombreCol === 'PESO INTERNO') {
-                        orden.cod = 'E13';
-                        orden.codigoExtraido = 'E13';
-                        orden.reemplazo = SistemaInventario.catalogoReemplazos['E13'] || null;
-                        orden.tuberia = 'PESO INTERNO';
-                        SistemaInventario.ordenes.push(orden);
-                        ordenesDeEstaFila++;
-                        continue;
-                    }
-
-                    // Traducir nombre de columna al nombre exacto del catálogo
-                    const nombreCatalogo = (MAPA_NOMBRES_CATALOGO[nombreCol] || nombreCol).toUpperCase().trim();
-                    const llaveAcc = `${nombreCatalogo}|${colorDeseado}`;
-                    let codigoAccesorio = null;
-                    if (colorDeseado) {
-                        codigoAccesorio = SistemaInventario.catalogoAccesorios[llaveAcc] || null;
-                        if (!codigoAccesorio) {
-                            console.warn(`⚠️ Accesorio no encontrado en catálogo: ${llaveAcc}`);
-                        }
-                    }
-
-                    if (!codigoAccesorio) {
-                        // Hard fail: no inventar códigos, saltar hasta que el usuario mapee en el catálogo
-                        continue;
-                    }
-                    orden.cod = codigoAccesorio;
-                    orden.codigoExtraido = codigoAccesorio;
-                    orden.reemplazo = SistemaInventario.catalogoReemplazos[codigoAccesorio] || null;
-
-                    // Sobrescribir propiedades heredadas para dar contexto al operario
-                    orden.tuberia = `${nombreCol} - ${colorDeseado || 'SIN COLOR'}`;
-                    // codSec se mantiene del datosCompartidos (sistema de cortina original)
-                }
-
-                SistemaInventario.ordenes.push(orden);
-                ordenesDeEstaFila++;
-            }
-
-            if (ordenesDeEstaFila > 1) filasConMultiCorte++;
-        }
-
-        // Ordenar por OT y luego por Ubicación para agrupar como kit de armado
-        SistemaInventario.ordenes.sort((a, b) => {
-            const otA = String(a.ot || '');
-            const otB = String(b.ot || '');
-            if (otA !== otB) return otA.localeCompare(otB, undefined, { numeric: true });
-            return String(a.ubic || '').localeCompare(String(b.ubic || ''), undefined, { numeric: true });
-        });
-        // Reasignar IDs secuenciales tras el ordenamiento
-        SistemaInventario.ordenes.forEach((ord, idx) => { ord.id = idx + 1; });
+        const filasConMultiCorte = expandirOrdenesDesdeExcel();
 
         actualizarTablaOrdenes();
         document.getElementById('estadoOrdenes').textContent = `✓ ${SistemaInventario.ordenes.length} órdenes`;
@@ -2540,19 +2548,15 @@ window.cerrarSesion = cerrarSesion;
 // ====== RECTIFICACIÓN AL VUELO DE TUBOS NUEVOS ======
 
 function recalcularPlan() {
-    // Restaurar inventario y órdenes desde las copias crudas
+    // Restaurar colmenas desde la copia cruda
     if (SistemaInventario.colmenaCruda.length > 0) {
         SistemaInventario.colmenas = JSON.parse(JSON.stringify(SistemaInventario.colmenaCruda));
-    }
-    if (SistemaInventario.ordenesCrudas.length > 0) {
-        SistemaInventario.ordenes = JSON.parse(JSON.stringify(SistemaInventario.ordenesCrudas));
     }
 
     // Restaurar seriales al estado original (todos 'disponible', sin ordenId/fechaUso)
     if (SistemaInventario.serialesCrudos.length > 0) {
         SistemaInventario.seriales = JSON.parse(JSON.stringify(SistemaInventario.serialesCrudos));
     } else {
-        // Fallback: resetear campos manualmente si no hay copia cruda
         SistemaInventario.seriales.forEach(s => {
             s.estado = 'disponible';
             delete s.ordenId;
@@ -2565,6 +2569,11 @@ function recalcularPlan() {
     SistemaInventario.resultadosOptimizacion = [];
     SistemaInventario.mermas = [];
     SistemaInventario.logs = [];
+
+    // Re-expandir órdenes desde los datos crudos del Excel (FASE 3 completa)
+    // Esto reconstruye tubos + accesorios + pesos desde cero
+    SistemaInventario.ordenesCrudas = []; // Resetear para que ejecutarOptimizacion guarde la nueva copia
+    expandirOrdenesDesdeExcel();
 
     // Re-ejecutar optimización con los overrides activos
     ejecutarOptimizacion();
