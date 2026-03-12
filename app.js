@@ -1210,6 +1210,11 @@ function expandirOrdenesDesdeExcel() {
                     const valColor = fila[idxColumnaColor[nombreColumnaColor]];
                     colorDeseado = valColor ? String(valColor).toUpperCase().trim() : '';
                 }
+                // Fallback general: si la columna específica no existe en este Excel, usar COLOR ACCESORIOS
+                if (!colorDeseado && idxColumnaColor['COLOR ACCESORIOS'] !== undefined) {
+                    const valFallback = fila[idxColumnaColor['COLOR ACCESORIOS']];
+                    colorDeseado = valFallback ? String(valFallback).toUpperCase().trim() : '';
+                }
 
                 // Excepción dura: PESO INTERNO siempre es E13, sin importar color
                 if (nombreCol === 'PESO INTERNO') {
