@@ -2412,25 +2412,28 @@ function exportarResultados() {
     // ─── Limpieza de sobrantes intermedios (inventario fantasma) ───
     // Recorrer de atrás hacia adelante: si un GUARDAR SOBRANTE fue consumido
     // más abajo como Tubo Origen de un CORTAR, es intermedio y se elimina.
+    // Llave simplificada: Código|Medida (sin Lote/Serial, que son '-' en sobrantes)
     const tubosConsumidos = [];
     for (let f = datosExcel.length - 1; f >= 1; f--) {
         const fila = datosExcel[f];
         const accion = String(fila[2] || '').toUpperCase();
+        const codigo = fila[4];
 
         if (accion.includes('CORTAR')) {
-            // Registrar este tubo origen como consumido
-            const medidaOrigen = Number(fila[7] || 0).toFixed(1);
-            const llave = `${fila[4]}|${medidaOrigen}|${fila[8]}|${fila[10]}`;
-            tubosConsumidos.push(llave);
-        } else if (accion === 'GUARDAR SOBRANTE' || accion === 'DESECHAR MERMA') {
-            // Armar llave con la medida del sobrante
-            const medidaSob = Number(fila[6] || 0).toFixed(1);
-            const llaveSobrante = `${fila[4]}|${medidaSob}|${fila[8]}|${fila[10]}`;
-            const idxConsumo = tubosConsumidos.indexOf(llaveSobrante);
-            if (idxConsumo !== -1) {
-                // Sobrante intermedio: fue reutilizado más abajo → eliminar
-                tubosConsumidos.splice(idxConsumo, 1); // balancear
-                datosExcel.splice(f, 1); // eliminar fila fantasma
+            const origen = Number(fila[7]);
+            if (!isNaN(origen) && origen > 0) {
+                tubosConsumidos.push(`${codigo}|${origen.toFixed(1)}`);
+            }
+        } else if (accion.includes('GUARDAR SOBRANTE') || accion.includes('DESECHAR MERMA')) {
+            const medidaSob = Number(fila[6]);
+            if (!isNaN(medidaSob) && medidaSob > 0) {
+                const llaveSobrante = `${codigo}|${medidaSob.toFixed(1)}`;
+                const idxConsumo = tubosConsumidos.indexOf(llaveSobrante);
+                if (idxConsumo !== -1) {
+                    // Sobrante intermedio: fue reutilizado más abajo → eliminar
+                    tubosConsumidos.splice(idxConsumo, 1);
+                    datosExcel.splice(f, 1);
+                }
             }
         }
     }
