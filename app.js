@@ -2294,12 +2294,65 @@ function ejecutarOptimizacion() {
         agregarPaso(numPaso, `Orden ${orden.id}: ${orden.medida_cm}cm`, infoResultado);
     });
 
+    // ─── Limpieza de sobrantes intermedios en memoria (anti inventario fantasma) ───
+    // Recorrer resultados de atrás hacia adelante: si un sobrante fue reutilizado
+    // como tubo origen en un corte posterior, es intermedio y debe eliminarse de
+    // resultadosOptimizacion Y de colmenasHistorico ANTES de persistir.
+    const _tubosConsumidos = [];
+    for (let ri = SistemaInventario.resultadosOptimizacion.length - 1; ri >= 0; ri--) {
+        const item = SistemaInventario.resultadosOptimizacion[ri];
+        const res = item.resultado;
+        if (!res) continue;
+        const codigoRes = res.codigo || res.codigo_original || '';
+
+        // Registrar cada tubo origen consumido por un corte
+        const origenNum = Number(res.medida_origen);
+        if (!isNaN(origenNum) && origenNum > 0) {
+            _tubosConsumidos.push(`${codigoRes}|${origenNum.toFixed(1)}`);
+        }
+
+        // Si este resultado generó un sobrante (no desecho), verificar si fue consumido más abajo
+        if (res.sobrante_cm > 0 && !res.es_desecho) {
+            const llaveSobrante = `${codigoRes}|${Number(res.sobrante_cm).toFixed(1)}`;
+            const idxConsumo = _tubosConsumidos.indexOf(llaveSobrante);
+            if (idxConsumo !== -1) {
+                // Sobrante intermedio: fue reutilizado → limpiar
+                _tubosConsumidos.splice(idxConsumo, 1); // balancear
+
+                // Purgar el fantasma de colmenasHistorico (buscar entrada disponible con esa medida y código)
+                const medidaFantasma = Math.round(res.sobrante_cm * 10);
+                const idxFantasma = SistemaInventario.colmenasHistorico.findIndex(c =>
+                    c.estado === 'disponible' &&
+                    c.cod === codigoRes &&
+                    c.medida_mm === medidaFantasma
+                );
+                if (idxFantasma !== -1) {
+                    SistemaInventario.colmenasHistorico.splice(idxFantasma, 1);
+                    log(`🧹 Sobrante intermedio eliminado de colmenas: ${codigoRes} ${res.sobrante_cm}cm`, 'info');
+                }
+
+                // También purgar de colmenasDisponibles
+                const idxDispFantasma = SistemaInventario.colmenasDisponibles.findIndex(c =>
+                    c.cod === codigoRes &&
+                    c.medida_mm === medidaFantasma
+                );
+                if (idxDispFantasma !== -1) {
+                    SistemaInventario.colmenasDisponibles.splice(idxDispFantasma, 1);
+                }
+
+                // Anular sobrante para que no genere fila GUARDAR SOBRANTE
+                res.sobrante_cm = 0;
+                res.colmena_sobrante = null;
+            }
+        }
+    }
+
     actualizarTablaColmenasResultado();
     actualizarTablaMermas();
 
     document.getElementById('btnExportarDisponibles').disabled = false;
     log('=== COMPLETADO ===', 'success');
-    
+
     let html = '<div class="resumen-resultado"><h3>✓ Optimización Completada</h3>';
     resultados.forEach(r => {
         let badge = 'badge';
