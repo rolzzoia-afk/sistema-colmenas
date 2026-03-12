@@ -1088,11 +1088,12 @@ function expandirOrdenesDesdeExcel() {
 
     // Traductor: nombre columna en Libro4 → nombre exacto en el Catálogo
     const MAPA_NOMBRES_CATALOGO = {
-        'PERFIL [CORTINA VERTICAL]': 'PERFIL CORTINA VERTICAL',
-        'VARILLA [CORTINA VERTICAL]': 'VARILLA CORTINA VERTICAL',
+        'PERFIL [CORTINA VERTICAL]': 'CABEZAL VERTICAL',
+        'VARILLA [CORTINA VERTICAL]': 'VARILLA VERTICAL 4 PUNTAS',
         'PERFIL (IZQ) INT': 'PERFIL IZQUIERDO INTERNO',
         'PERFIL (DER) INT': 'PERFIL DERECHO INTERNO',
-        'PESO U': 'PESO INFERIOR DE DÚO LÁGRIMA'
+        'PESO U': 'PESO INFERIOR DE DÚO LÁGRIMA',
+        'PESO': 'PESO INFERIOR ROLLER'
     };
 
     // Mapa explícito: componente → columna de color que le corresponde
@@ -1108,7 +1109,8 @@ function expandirOrdenesDesdeExcel() {
         'PERFIL BASE': 'COLOR PERFIL',
         'CENEFA DELANTERA': 'COLOR PERFIL',
         'CENEFA TRASERA': 'COLOR PERFIL',
-        'PESO SOFT LIGHT': 'COLOR PESO INF. SOFT LIGHT'
+        'PESO SOFT LIGHT': 'COLOR PESO INF. SOFT LIGHT',
+        'PESO': 'COLOR ACCESORIOS'
     };
 
     // Mapear cada nombre de COLUMNAS_CORTE a su índice real en el Excel
@@ -1222,17 +1224,23 @@ function expandirOrdenesDesdeExcel() {
 
                 // Traducir nombre de columna al nombre exacto del catálogo
                 const nombreCatalogo = (MAPA_NOMBRES_CATALOGO[nombreCol] || nombreCol).toUpperCase().trim();
-                const llaveAcc = `${nombreCatalogo}|${colorDeseado}`;
+                let llaveDiccionario = `${nombreCatalogo}|${colorDeseado}`;
                 let codigoAccesorio = null;
                 if (colorDeseado) {
-                    codigoAccesorio = SistemaInventario.catalogoAccesorios[llaveAcc] || null;
-                    if (!codigoAccesorio) {
-                        console.warn(`⚠️ Accesorio no encontrado en catálogo: ${llaveAcc}`);
-                    }
+                    codigoAccesorio = SistemaInventario.catalogoAccesorios[llaveDiccionario] || null;
+                }
+                // Fallback 1: buscar en color ALUMINIO por defecto (común en rieles/varillas)
+                if (!codigoAccesorio) {
+                    codigoAccesorio = SistemaInventario.catalogoAccesorios[`${nombreCatalogo}|ALUMINIO`] || null;
+                }
+                // Fallback 2: buscar sin color (por si en el catálogo está en blanco)
+                if (!codigoAccesorio) {
+                    codigoAccesorio = SistemaInventario.catalogoAccesorios[`${nombreCatalogo}|`] || null;
                 }
 
                 if (!codigoAccesorio) {
                     // Hard fail: no inventar códigos, saltar hasta que el usuario mapee en el catálogo
+                    console.warn(`⚠️ Accesorio no encontrado en catálogo (ni fallbacks): ${llaveDiccionario}`);
                     continue;
                 }
                 orden.cod = codigoAccesorio;
