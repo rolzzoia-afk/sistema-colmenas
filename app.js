@@ -2408,9 +2408,35 @@ function exportarResultados() {
             }
         }
     });
-    
+
+    // ─── Limpieza de sobrantes intermedios (inventario fantasma) ───
+    // Recorrer de atrás hacia adelante: si un GUARDAR SOBRANTE fue consumido
+    // más abajo como Tubo Origen de un CORTAR, es intermedio y se elimina.
+    const tubosConsumidos = [];
+    for (let f = datosExcel.length - 1; f >= 1; f--) {
+        const fila = datosExcel[f];
+        const accion = String(fila[2] || '').toUpperCase();
+
+        if (accion.includes('CORTAR')) {
+            // Registrar este tubo origen como consumido
+            const medidaOrigen = Number(fila[7] || 0).toFixed(1);
+            const llave = `${fila[4]}|${medidaOrigen}|${fila[8]}|${fila[10]}`;
+            tubosConsumidos.push(llave);
+        } else if (accion === 'GUARDAR SOBRANTE' || accion === 'DESECHAR MERMA') {
+            // Armar llave con la medida del sobrante
+            const medidaSob = Number(fila[6] || 0).toFixed(1);
+            const llaveSobrante = `${fila[4]}|${medidaSob}|${fila[8]}|${fila[10]}`;
+            const idxConsumo = tubosConsumidos.indexOf(llaveSobrante);
+            if (idxConsumo !== -1) {
+                // Sobrante intermedio: fue reutilizado más abajo → eliminar
+                tubosConsumidos.splice(idxConsumo, 1); // balancear
+                datosExcel.splice(f, 1); // eliminar fila fantasma
+            }
+        }
+    }
+
     const ws = XLSX.utils.aoa_to_sheet(datosExcel);
-    
+
     // Aplicar estilos a las filas de desecho para que sean visualmente distintas
     const range = XLSX.utils.decode_range(ws['!ref']);
     for (let R = 1; R <= range.e.r; ++R) {
