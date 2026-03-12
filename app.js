@@ -1577,7 +1577,7 @@ function actualizarTablaColmenasResultado() {
         const ord = SistemaInventario.ordenes.find(o => o.id === r.orden) || {};
         const color = r.color || obtenerColorDeCatalogo(r.codigo || r.codigo_original || '');
         const accion = (ord.componente && ord.componente !== 'TUBO') ? `CORTAR ${ord.componente}` : 'CORTAR';
-        return `<tr>
+        let filaHtml = `<tr>
             <td>${r.colmena || r.nombreMaterialNuevo || 'TUBO NUEVO'}</td>
             <td>${r.codigo || '-'}</td>
             <td>${color}</td>
@@ -1585,6 +1585,29 @@ function actualizarTablaColmenasResultado() {
             <td>${r.medida_origen !== undefined ? r.medida_origen + ' cm' : '-'}</td>
             <td><span class="tag-accion">${accion}</span></td>
         </tr>`;
+        // Mostrar fila de sobrante/intermedio/merma en la tabla HTML
+        if (r.sobrante_cm > 0) {
+            if (r.es_intermedio) {
+                filaHtml += `<tr style="background:#fff8e1;">
+                    <td>-</td><td>${r.codigo || '-'}</td><td>${color}</td>
+                    <td>${r.sobrante_cm} cm</td><td>-</td>
+                    <td><span class="tag-accion" style="background:#ff9800;color:#fff;">RESERVAR EN MESA</span></td>
+                </tr>`;
+            } else if (r.es_desecho) {
+                filaHtml += `<tr style="background:#ffebee;">
+                    <td>BASURERO</td><td>${r.codigo || '-'}</td><td>${color}</td>
+                    <td>${r.sobrante_cm} cm</td><td>-</td>
+                    <td><span class="tag-accion" style="background:#e53935;color:#fff;">DESECHAR MERMA</span></td>
+                </tr>`;
+            } else {
+                filaHtml += `<tr style="background:#e8f5e9;">
+                    <td>${r.colmena_sobrante || r.colmena || '-'}</td><td>${r.codigo || '-'}</td><td>${color}</td>
+                    <td>${r.sobrante_cm} cm</td><td>-</td>
+                    <td><span class="tag-accion" style="background:#43a047;color:#fff;">GUARDAR SOBRANTE</span></td>
+                </tr>`;
+            }
+        }
+        return filaHtml;
     }).join('');
 }
 
@@ -2340,9 +2363,8 @@ function ejecutarOptimizacion() {
                     SistemaInventario.colmenasDisponibles.splice(idxDispFantasma, 1);
                 }
 
-                // Anular sobrante para que no genere fila GUARDAR SOBRANTE
-                res.sobrante_cm = 0;
-                res.colmena_sobrante = null;
+                // Marcar como intermedio (visible para el operario, invisible para la BD)
+                res.es_intermedio = true;
             }
         }
     }
@@ -2424,41 +2446,38 @@ function exportarResultados() {
             fechaFormateada
         ]);
 
-        // Si existe un sobrante (> 0), insertar una fila según si es desecho o no
+        // Si existe un sobrante (> 0), insertar una fila según su tipo
         if (res.sobrante_cm > 0) {
-            if (res.es_desecho) {
+            let accionSobrante, colmenaDestino;
+
+            if (res.es_intermedio) {
+                // Sobrante intermedio: el operario lo dejará en mesa, se reutiliza en el siguiente corte
+                accionSobrante = 'RESERVAR EN MESA';
+                colmenaDestino = '-';
+            } else if (res.es_desecho) {
                 // Merma ≤ 10 cm
-                datosExcel.push([
-                    ord.ot || '-',
-                    '',
-                    'DESECHAR MERMA',
-                    'BASURERO',
-                    codigoPrincipal,
-                    color,
-                    res.sobrante_cm,
-                    '-',
-                    s.lote || ord.lote || '-',
-                    s.paquete || ord.paquete || '-',
-                    s.serial || ord.serial || '-',
-                    s.fecha || ord.fecha || '-'
-                ]);
+                accionSobrante = 'DESECHAR MERMA';
+                colmenaDestino = 'BASURERO';
             } else {
-                // Sobrante normal (> 10 cm)
-                datosExcel.push([
-                    ord.ot || '-',
-                    '',
-                    'GUARDAR SOBRANTE',
-                    res.colmena_sobrante || res.colmena || '-',
-                    codigoPrincipal,
-                    color,
-                    res.sobrante_cm,
-                    '-',
-                    s.lote || ord.lote || '-',
-                    s.paquete || ord.paquete || '-',
-                    s.serial || ord.serial || '-',
-                    s.fecha || ord.fecha || '-'
-                ]);
+                // Sobrante final real (> 10 cm)
+                accionSobrante = 'GUARDAR SOBRANTE';
+                colmenaDestino = res.colmena_sobrante || res.colmena || '-';
             }
+
+            datosExcel.push([
+                ord.ot || '-',
+                '',
+                accionSobrante,
+                colmenaDestino,
+                codigoPrincipal,
+                color,
+                res.sobrante_cm,
+                '-',
+                s.lote || ord.lote || '-',
+                s.paquete || ord.paquete || '-',
+                s.serial || ord.serial || '-',
+                s.fecha || ord.fecha || '-'
+            ]);
         }
     });
 
@@ -2493,18 +2512,26 @@ function exportarResultados() {
 
     const ws = XLSX.utils.aoa_to_sheet(datosExcel);
 
-    // Aplicar estilos a las filas de desecho para que sean visualmente distintas
+    // Aplicar estilos visuales a filas especiales
     const range = XLSX.utils.decode_range(ws['!ref']);
     for (let R = 1; R <= range.e.r; ++R) {
         const accionCell = ws[XLSX.utils.encode_cell({r: R, c: 2})]; // Columna "Acción"
-        if (accionCell && accionCell.v === 'DESECHAR MERMA') {
-            // Marcar visualmente las filas de desecho (esto se aplicará cuando se abra en Excel)
+        if (!accionCell) continue;
+
+        let fillColor = null, fontColor = null;
+        if (accionCell.v === 'DESECHAR MERMA') {
+            fillColor = "FFFF9999"; fontColor = "FF990000"; // Rojo claro / rojo oscuro
+        } else if (accionCell.v === 'RESERVAR EN MESA') {
+            fillColor = "FFFFF3E0"; fontColor = "FFE65100"; // Naranja claro / naranja oscuro
+        }
+
+        if (fillColor) {
             for (let C = 0; C <= range.e.c; ++C) {
                 const cell = ws[XLSX.utils.encode_cell({r: R, c: C})];
                 if (cell) {
                     if (!cell.s) cell.s = {};
-                    cell.s.fill = {fgColor: {rgb: "FFFF9999"}}; // Fondo rojo claro
-                    cell.s.font = {color: {rgb: "FF990000"}, bold: true}; // Texto rojo oscuro en negrita
+                    cell.s.fill = {fgColor: {rgb: fillColor}};
+                    cell.s.font = {color: {rgb: fontColor}, bold: true};
                 }
             }
         }
