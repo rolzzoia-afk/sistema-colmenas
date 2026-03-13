@@ -146,33 +146,98 @@ async function forzarActualizacion() {
 
 // ─── CARGAR USUARIOS ────────────────────────────────────────────────────────
 
+// Lista conocida de emails de taller (fallback cuando Firestore no lista documentos padre)
+const USUARIOS_CONOCIDOS = [];
+
 async function cargarUsuarios() {
     const select = document.getElementById("selectUsuario");
+    let usuarios = [];
+
     try {
+        // Intento 1: leer documentos directos de la colección "usuarios"
+        console.log("🔍 Consultando colección 'usuarios'...");
         const colRef = window.fbCollection(window.fbDb, "usuarios");
         const snapshot = await window.fbGetDocs(colRef);
+        console.log("📊 Documentos encontrados en 'usuarios':", snapshot.size);
 
-        select.innerHTML = '<option value="">-- Seleccionar usuario --</option>';
-
-        const usuarios = [];
         snapshot.forEach(docSnap => {
+            console.log("  → doc:", docSnap.id);
             usuarios.push(docSnap.id);
         });
-        usuarios.sort();
-
-        usuarios.forEach(email => {
-            const opt = document.createElement("option");
-            opt.value = email;
-            opt.textContent = email;
-            select.appendChild(opt);
-        });
-
-        if (usuarios.length === 0) {
-            select.innerHTML = '<option value="">No se encontraron usuarios</option>';
-        }
     } catch (error) {
-        console.error("Error cargando usuarios:", error);
-        select.innerHTML = '<option value="">Error cargando usuarios</option>';
+        console.error("❌ Error leyendo colección 'usuarios':", error.code, error.message);
+    }
+
+    // Intento 2: si no encontró nada, usar el email del admin logueado como primer candidato
+    if (usuarios.length === 0) {
+        console.log("⚠️ 0 documentos en 'usuarios'. Activando detección alternativa...");
+
+        // Agregar usuarios conocidos configurados manualmente
+        usuarios = [...USUARIOS_CONOCIDOS];
+
+        // Agregar el propio email del admin como candidato
+        const adminEmail = window.fbAuth.currentUser?.email;
+        if (adminEmail && !usuarios.includes(adminEmail)) {
+            usuarios.push(adminEmail);
+        }
+
+        // Intentar descubrir usuarios probando rutas de inventario conocidas
+        if (usuarios.length > 0) {
+            const usuariosVerificados = [];
+            for (const email of usuarios) {
+                try {
+                    const invRef = window.fbDoc(window.fbDb, "usuarios", email, "inventario", "datos");
+                    const invSnap = await window.fbGetDoc(invRef);
+                    if (invSnap.exists()) {
+                        usuariosVerificados.push(email);
+                        console.log("  ✅ Verificado (tiene inventario):", email);
+                    } else {
+                        // Probar colmena_final
+                        const colRef = window.fbDoc(window.fbDb, "usuarios", email, "colmena_final", "datos");
+                        const colSnap = await window.fbGetDoc(colRef);
+                        if (colSnap.exists()) {
+                            usuariosVerificados.push(email);
+                            console.log("  ✅ Verificado (tiene colmena_final):", email);
+                        } else {
+                            console.log("  ⚪ Sin datos:", email);
+                            // Aún así incluirlo para que pueda intentar
+                            usuariosVerificados.push(email);
+                        }
+                    }
+                } catch (e) {
+                    console.warn("  ⚠️ Error verificando", email, ":", e.message);
+                    usuariosVerificados.push(email); // incluir de todos modos
+                }
+            }
+            usuarios = usuariosVerificados;
+        }
+
+        console.log("📋 Usuarios detectados (fallback):", usuarios);
+    }
+
+    // Poblar el selector
+    select.innerHTML = '<option value="">-- Seleccionar usuario --</option>';
+    usuarios.sort();
+    usuarios.forEach(email => {
+        const opt = document.createElement("option");
+        opt.value = email;
+        opt.textContent = email;
+        select.appendChild(opt);
+    });
+
+    // Si solo hay 1 usuario, seleccionarlo automáticamente y cargar inventario
+    if (usuarios.length === 1) {
+        select.value = usuarios[0];
+        console.log("👁️ Auto-seleccionando único usuario:", usuarios[0]);
+        suscribirInventarioUsuario(usuarios[0]);
+    } else if (usuarios.length === 0) {
+        console.warn("⚠️ No se detectaron usuarios. Cargando inventario del admin como fallback global...");
+        select.innerHTML = '<option value="">Sin usuarios detectados (mostrando global)</option>';
+        // Fallback global: usar el email del admin logueado
+        const adminEmail = window.fbAuth.currentUser?.email;
+        if (adminEmail) {
+            suscribirInventarioUsuario(adminEmail);
+        }
     }
 }
 

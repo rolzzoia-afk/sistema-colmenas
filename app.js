@@ -153,7 +153,14 @@ async function guardarEnFirestore() {
             window.firebaseDoc(db, "usuarios", user.email, "inventario", "datos"),
             datosAhorro
         );
-        
+
+        // Asegurar que el documento padre del usuario exista para que el admin lo detecte
+        await window.firebaseSetDoc(
+            window.firebaseDoc(db, "usuarios", user.email),
+            { ultimaActividad: new Date().toISOString() },
+            { merge: true }
+        );
+
         console.log("✅ Inventario guardado en Firestore correctamente");
         log("✅ Inventario guardado exitosamente en Firestore", "success");
     } catch (error) {
@@ -406,6 +413,13 @@ async function guardarColmenaFinalEnFirestore() {
             data: JSON.stringify(colmenasFinal),
             fechaActualizacion: new Date().toISOString()
         };
+
+        // Asegurar que el documento padre del usuario exista
+        await window.firebaseSetDoc(
+            window.firebaseDoc(db, "usuarios", user.email),
+            { ultimaActividad: new Date().toISOString() },
+            { merge: true }
+        );
 
         await window.firebaseSetDoc(
             window.firebaseDoc(db, "usuarios", user.email, "colmena_final", "datos"),
