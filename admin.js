@@ -446,15 +446,20 @@ function renderizarHistorial() {
         const fecha = new Date(op.fecha);
         const fechaStr = `${String(fecha.getDate()).padStart(2,"0")}/${String(fecha.getMonth()+1).padStart(2,"0")}/${fecha.getFullYear()} ${String(fecha.getHours()).padStart(2,"0")}:${String(fecha.getMinutes()).padStart(2,"0")}`;
         const esRevertido = op.estado === "REVERTIDO";
-        const rowStyle = esRevertido ? 'style="background:rgba(231,76,60,0.15);"' : '';
-        const badgeRevertido = esRevertido
-            ? `<span style="background:#e74c3c;color:white;padding:2px 8px;border-radius:3px;font-size:10px;font-weight:bold;margin-left:8px;">❌ REVERTIDO</span>`
-            : '';
-        const motivoHtml = esRevertido && op.motivo_error
+        const esCascada = op.estado === "ANULADO_POR_CASCADA";
+        const esAnulado = esRevertido || esCascada;
+        const rowStyle = esAnulado ? 'style="background:rgba(231,76,60,0.15);"' : '';
+        let badgeHtml = '';
+        if (esRevertido) {
+            badgeHtml = `<span style="background:#e74c3c;color:white;padding:2px 8px;border-radius:3px;font-size:10px;font-weight:bold;margin-left:8px;">❌ REVERTIDO</span>`;
+        } else if (esCascada) {
+            badgeHtml = `<span style="background:#e67e22;color:white;padding:2px 8px;border-radius:3px;font-size:10px;font-weight:bold;margin-left:8px;">⚠️ ANULADO (CASCADA)</span>`;
+        }
+        const motivoHtml = esAnulado && op.motivo_error
             ? `<div style="font-size:10px;color:#e57373;margin-top:3px;font-style:italic;">Motivo: ${op.motivo_error}</div>`
             : '';
         return `<tr ${rowStyle}>
-            <td>${fechaStr}${badgeRevertido}</td>
+            <td>${fechaStr}${badgeHtml}</td>
             <td>${op.nombre_excel || '-'}${motivoHtml}</td>
             <td>${op.total_cortes || '-'}</td>
             <td>
@@ -630,19 +635,47 @@ async function ejecutarRollback() {
         if (insertCount > 0) await batchInsert.commit();
         console.log(`✅ ${snapshotSeriales.length} seriales restaurados`);
 
-        // 3. Etiquetar el documento del historial como REVERTIDO
-        const historialDocRef = window.fbDoc(
-            db, "usuarios", usuarioSeleccionado, "historial_operaciones", operacionSeleccionada.id
-        );
-        await window.fbUpdateDoc(historialDocRef, {
-            estado: "REVERTIDO",
-            motivo_error: motivoError.trim(),
-            fecha_reversion: new Date().toISOString(),
-            revertido_por: window.fbAuth.currentUser.email
-        });
-        console.log(`🏷️ Historial etiquetado como REVERTIDO: ${operacionSeleccionada.id}`);
+        // 3. Anulación en cascada: etiquetar esta operación + todas las posteriores
+        const fechaReversion = new Date().toISOString();
+        const adminEmail = window.fbAuth.currentUser.email;
+        const fechaOperacion = operacionSeleccionada.fecha;
 
-        alert(`Rollback completado exitosamente.\n\nMotivo: "${motivoError.trim()}"\n\n• ${snapshotColmenas.length} colmenas restauradas\n• ${snapshotSeriales.length} seriales restaurados`);
+        // Consultar todas las operaciones con fecha >= a la seleccionada
+        const histColRef = window.fbCollection(db, "usuarios", usuarioSeleccionado, "historial_operaciones");
+        const cascadaQuery = window.fbQuery(histColRef, window.fbWhere("fecha", ">=", fechaOperacion));
+        const cascadaSnap = await window.fbGetDocs(cascadaQuery);
+
+        let contadorRevertido = 0;
+        let contadorCascada = 0;
+
+        for (const docSnap of cascadaSnap.docs) {
+            const docRef = window.fbDoc(db, "usuarios", usuarioSeleccionado, "historial_operaciones", docSnap.id);
+            if (docSnap.id === operacionSeleccionada.id) {
+                // El documento clickeado: REVERTIDO
+                await window.fbUpdateDoc(docRef, {
+                    estado: "REVERTIDO",
+                    motivo_error: motivoError.trim(),
+                    fecha_reversion: fechaReversion,
+                    revertido_por: adminEmail
+                });
+                contadorRevertido++;
+            } else {
+                // Documentos posteriores: ANULADO_POR_CASCADA
+                await window.fbUpdateDoc(docRef, {
+                    estado: "ANULADO_POR_CASCADA",
+                    motivo_error: "Anulado automáticamente porque se revirtió una operación anterior en la línea de tiempo.",
+                    fecha_reversion: fechaReversion,
+                    revertido_por: "SISTEMA"
+                });
+                contadorCascada++;
+            }
+        }
+        console.log(`🏷️ Historial etiquetado — REVERTIDO: ${contadorRevertido}, CASCADA: ${contadorCascada}`);
+
+        const cascadaMsg = contadorCascada > 0
+            ? `\n• ${contadorCascada} operación(es) posterior(es) anulada(s) por cascada`
+            : '';
+        alert(`Rollback completado exitosamente.\n\nMotivo: "${motivoError.trim()}"\n\n• ${snapshotColmenas.length} colmenas restauradas\n• ${snapshotSeriales.length} seriales restaurados${cascadaMsg}`);
         cerrarModal();
 
     } catch (error) {
@@ -650,7 +683,7 @@ async function ejecutarRollback() {
         alert("Error durante el rollback: " + error.message);
     } finally {
         btnRollback.disabled = false;
-        btnRollback.textContent = "⏪ Revertir inventario a este punto";
+        btnRollback.textContent = "❌ Anular esta operación (y restaurar inventario previo)";
     }
 }
 

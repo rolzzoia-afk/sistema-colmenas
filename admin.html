@@ -232,7 +232,7 @@
 
         <div style="display:flex; gap:15px; justify-content:flex-end; flex-wrap:wrap;">
             <button class="btn-danger" id="btnRollback" style="font-size:14px; padding:12px 24px;">
-                ⏪ Revertir inventario a este punto
+                ❌ Anular esta operación (y restaurar inventario previo)
             </button>
             <button id="btnCerrarModal2" style="background:#2c3e6e; color:#eee; border:none; padding:12px 24px; border-radius:8px; cursor:pointer; font-size:14px;">
                 Cerrar
@@ -263,6 +263,7 @@
     writeBatch,
     query,
     orderBy,
+    where,
     addDoc
   } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
@@ -296,6 +297,7 @@
   window.fbWriteBatch = writeBatch;
   window.fbQuery = query;
   window.fbOrderBy = orderBy;
+  window.fbWhere = where;
   window.fbAddDoc = addDoc;
 
   console.log("🔥 Firebase Admin inicializado.");
