@@ -2213,8 +2213,9 @@ function ejecutarOptimizacion() {
                             medida_cm: orden.medida_cm,
                             fuente: fuente,
                             colmena: tuboReemplazo.colmena.n_colmena,
-                            codigo_original: tuboReemplazo.colmena.cod,
-                            codigo_reemplazo: codReemplazo,
+                            codigo: tuboReemplazo.colmena.cod,
+                            codigo_original: codOrden,
+                            codigo_reemplazo: tuboReemplazo.colmena.cod,
                             sobrante_cm: tuboReemplazo.sobrante_mm / 10,
                             medida_origen: tuboReemplazo.medidaOriginal / 10,
                             serial: tuboReemplazo.colmena.serial || null,
@@ -2326,6 +2327,7 @@ function ejecutarOptimizacion() {
                         medida_cm: orden.medida_cm,
                         fuente: 'tubo_nuevo',
                         colmena: posicionNueva,
+                        codigo: codOrden,
                         codigo_original: codOrden,
                         sobrante_cm: sobranteNuevo / 10,
                         medida_origen: medidaNuevoCm,
@@ -2343,6 +2345,7 @@ function ejecutarOptimizacion() {
                         medida_cm: orden.medida_cm,
                         fuente: 'tubo_nuevo',
                         colmena: posicionNueva,
+                        codigo: codOrden,
                         codigo_original: codOrden,
                         sobrante_cm: sobranteNuevo / 10,
                         medida_origen: medidaNuevoCm,
@@ -2537,16 +2540,22 @@ function renderizarStaging(resultados) {
     const tbodyPlan = document.getElementById('tbodyStagingPlan');
     tbodyPlan.innerHTML = resultados.map(r => {
         const ordenOriginal = SistemaInventario.ordenes[r.orden - 1] || {};
-        const color = obtenerColorDeCatalogo(r.codigo) || ordenOriginal.color || '';
+        const codigoReal = r.codigo || r.codigo_original || '';
+        const color = obtenerColorDeCatalogo(codigoReal) || ordenOriginal.color || '';
         let accion = r.fuente.toUpperCase();
         let badgeStyle = '';
         if (r.fuente === 'tubo_nuevo') badgeStyle = 'background:#f39c12;color:white;padding:2px 8px;border-radius:3px;';
         else if (r.fuente === 'reemplazo') badgeStyle = 'background:#3498db;color:white;padding:2px 8px;border-radius:3px;';
         else badgeStyle = 'background:#9b59b6;color:white;padding:2px 8px;border-radius:3px;';
 
+        // Indicador de reemplazo en la acción
+        if (r.fuente === 'reemplazo' && r.codigo_original && r.codigo_reemplazo && r.codigo_original !== r.codigo_reemplazo) {
+            accion = `CORTAR (Reemplazo: ${r.codigo_reemplazo})`;
+        }
+
         let filas = `<tr>
             <td>${r.colmena || r.nombreMaterialNuevo || '-'}</td>
-            <td>${r.codigo || '-'}</td>
+            <td>${codigoReal}</td>
             <td>${color}</td>
             <td>${formatearValor(r.medida_cm)}</td>
             <td>${formatearValor(r.medida_origen)}</td>
@@ -2569,7 +2578,7 @@ function renderizarStaging(resultados) {
             }
             filas += `<tr style="${estilo}">
                 <td>${r.colmena_sobrante || '-'}</td>
-                <td>${r.codigo || '-'}</td>
+                <td>${codigoReal}</td>
                 <td></td>
                 <td colspan="2">${formatearValor(r.sobrante_cm)} cm</td>
                 <td></td>
@@ -2675,7 +2684,7 @@ function exportarResultados() {
 
         const s = res.serial || ord.serial || {};
         const fechaFormateada = s.fecha ? formatearFecha(s.fecha) : '-';
-        const codigoPrincipal = res.codigo || ord.cod || '-';
+        const codigoPrincipal = res.codigo || res.codigo_original || ord.cod || '-';
         // res.color ya se setea en ejecutarOptimizacion; fallback a lookup directo
         const color = res.color || obtenerColorDeCatalogo(codigoPrincipal);
 
@@ -2683,6 +2692,10 @@ function exportarResultados() {
         let accionCortar = 'CORTAR';
         if (ord.componente && ord.componente !== 'TUBO') {
             accionCortar = `CORTAR ${ord.componente}`;
+        }
+        // Indicador de reemplazo si el código real difiere del pedido
+        if (res.fuente === 'reemplazo' && res.codigo_original && res.codigo_reemplazo && res.codigo_original !== res.codigo_reemplazo) {
+            accionCortar += ` (Reemplazo: ${res.codigo_reemplazo})`;
         }
 
         // Fila CORTAR
