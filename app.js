@@ -2541,6 +2541,9 @@ function renderizarStaging(resultados) {
     tbodyPlan.innerHTML = resultados.map(r => {
         const ordenOriginal = SistemaInventario.ordenes[r.orden - 1] || {};
         const codigoReal = r.codigo || r.codigo_original || '';
+        const codigoDisplay = (r.codigo_original && r.codigo && r.codigo_original !== r.codigo)
+            ? `${r.codigo_original} → ${r.codigo}`
+            : codigoReal;
         const color = obtenerColorDeCatalogo(codigoReal) || ordenOriginal.color || '';
         let accion = r.fuente.toUpperCase();
         let badgeStyle = '';
@@ -2548,14 +2551,9 @@ function renderizarStaging(resultados) {
         else if (r.fuente === 'reemplazo') badgeStyle = 'background:#3498db;color:white;padding:2px 8px;border-radius:3px;';
         else badgeStyle = 'background:#9b59b6;color:white;padding:2px 8px;border-radius:3px;';
 
-        // Indicador de reemplazo en la acción
-        if (r.fuente === 'reemplazo' && r.codigo_original && r.codigo_reemplazo && r.codigo_original !== r.codigo_reemplazo) {
-            accion = `CORTAR (Reemplazo: ${r.codigo_reemplazo})`;
-        }
-
         let filas = `<tr>
             <td>${r.colmena || r.nombreMaterialNuevo || '-'}</td>
-            <td>${codigoReal}</td>
+            <td>${codigoDisplay}</td>
             <td>${color}</td>
             <td>${formatearValor(r.medida_cm)}</td>
             <td>${formatearValor(r.medida_origen)}</td>
@@ -2578,7 +2576,7 @@ function renderizarStaging(resultados) {
             }
             filas += `<tr style="${estilo}">
                 <td>${r.colmena_sobrante || '-'}</td>
-                <td>${codigoReal}</td>
+                <td>${codigoDisplay}</td>
                 <td></td>
                 <td colspan="2">${formatearValor(r.sobrante_cm)} cm</td>
                 <td></td>
@@ -2684,18 +2682,17 @@ function exportarResultados() {
 
         const s = res.serial || ord.serial || {};
         const fechaFormateada = s.fecha ? formatearFecha(s.fecha) : '-';
-        const codigoPrincipal = res.codigo || res.codigo_original || ord.cod || '-';
+        const codigoReal = res.codigo || res.codigo_original || ord.cod || '-';
+        const codigoExcel = (res.codigo_original && res.codigo && res.codigo_original !== res.codigo)
+            ? `${res.codigo_original} → ${res.codigo}`
+            : codigoReal;
         // res.color ya se setea en ejecutarOptimizacion; fallback a lookup directo
-        const color = res.color || obtenerColorDeCatalogo(codigoPrincipal);
+        const color = res.color || obtenerColorDeCatalogo(codigoReal);
 
         // Acción descriptiva según componente
         let accionCortar = 'CORTAR';
         if (ord.componente && ord.componente !== 'TUBO') {
             accionCortar = `CORTAR ${ord.componente}`;
-        }
-        // Indicador de reemplazo si el código real difiere del pedido
-        if (res.fuente === 'reemplazo' && res.codigo_original && res.codigo_reemplazo && res.codigo_original !== res.codigo_reemplazo) {
-            accionCortar += ` (Reemplazo: ${res.codigo_reemplazo})`;
         }
 
         // Fila CORTAR
@@ -2704,7 +2701,7 @@ function exportarResultados() {
             ord.ubic || '-',
             accionCortar,
             res.fuente === 'tubo_nuevo' ? (res.nombreMaterialNuevo || 'TUBO NUEVO') : (res.colmena || '-'),
-            codigoPrincipal,
+            codigoExcel,
             color,
             res.medida_cm,
             res.medida_origen || '-',
@@ -2737,7 +2734,7 @@ function exportarResultados() {
                 '',
                 accionSobrante,
                 colmenaDestino,
-                codigoPrincipal,
+                codigoExcel,
                 color,
                 res.sobrante_cm,
                 '-',
