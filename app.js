@@ -703,42 +703,43 @@ async function cargarSerialesDesdeFirestore() {
 function buscarSerialDisponible(codigo) {
     // Normalizar el código
     const codigoNormalizado = normalizarCodigo(codigo);
-    
-    // Filtrar seriales disponibles para este código
-    const serialesDisponibles = SistemaInventario.seriales.filter(s => 
+
+    // Buscar directamente el índice en el array fuente (FIFO)
+    const idx = SistemaInventario.seriales.findIndex(s =>
         normalizarCodigo(s.codigo) === codigoNormalizado && s.estado === 'disponible'
     );
-    
-    // Si no hay seriales disponibles, retornar null
-    if (serialesDisponibles.length === 0) return null;
-    
-    // Los seriales ya están ordenados por FECHA, LOTE, PAQUETE, SERIAL
-    // Retornar el primero (FIFO)
-    return serialesDisponibles[0];
+
+    if (idx === -1) return null;
+
+    // CRÍTICO: Marcar como ocupado INMEDIATAMENTE para evitar que el mismo
+    // serial sea seleccionado en la siguiente iteración del bucle de optimización
+    SistemaInventario.seriales[idx].estado = 'ocupado';
+
+    return SistemaInventario.seriales[idx];
 }
 
-// Función para marcar un serial como ocupado
+// Función para marcar un serial como ocupado (complementa buscarSerialDisponible)
 function marcarSerialComoOcupado(serial, ordenId) {
-    // Buscar el serial en la lista
-    const idx = SistemaInventario.seriales.findIndex(s => 
-        s.codigo === serial.codigo && 
-        s.lote === serial.lote && 
-        s.paquete === serial.paquete && 
+    // Buscar el serial en la lista (usar normalizarCodigo para consistencia)
+    const idx = SistemaInventario.seriales.findIndex(s =>
+        normalizarCodigo(s.codigo) === normalizarCodigo(serial.codigo) &&
+        s.lote === serial.lote &&
+        s.paquete === serial.paquete &&
         s.serial === serial.serial
     );
-    
+
     if (idx !== -1) {
-        // Actualizar el estado
+        // Actualizar estado y metadata de trazabilidad
         SistemaInventario.seriales[idx].estado = 'ocupado';
         SistemaInventario.seriales[idx].ordenId = ordenId;
         SistemaInventario.seriales[idx].fechaUso = new Date().toISOString();
-        
+
         // Actualizar la tabla
         actualizarTablaSeriales();
-        
+
         return true;
     }
-    
+
     return false;
 }
 
