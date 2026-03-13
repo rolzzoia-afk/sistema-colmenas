@@ -445,9 +445,17 @@ function renderizarHistorial() {
     tbody.innerHTML = historialOperaciones.map((op, idx) => {
         const fecha = new Date(op.fecha);
         const fechaStr = `${String(fecha.getDate()).padStart(2,"0")}/${String(fecha.getMonth()+1).padStart(2,"0")}/${fecha.getFullYear()} ${String(fecha.getHours()).padStart(2,"0")}:${String(fecha.getMinutes()).padStart(2,"0")}`;
-        return `<tr>
-            <td>${fechaStr}</td>
-            <td>${op.nombre_excel || '-'}</td>
+        const esRevertido = op.estado === "REVERTIDO";
+        const rowStyle = esRevertido ? 'style="background:rgba(231,76,60,0.15);"' : '';
+        const badgeRevertido = esRevertido
+            ? `<span style="background:#e74c3c;color:white;padding:2px 8px;border-radius:3px;font-size:10px;font-weight:bold;margin-left:8px;">❌ REVERTIDO</span>`
+            : '';
+        const motivoHtml = esRevertido && op.motivo_error
+            ? `<div style="font-size:10px;color:#e57373;margin-top:3px;font-style:italic;">Motivo: ${op.motivo_error}</div>`
+            : '';
+        return `<tr ${rowStyle}>
+            <td>${fechaStr}${badgeRevertido}</td>
+            <td>${op.nombre_excel || '-'}${motivoHtml}</td>
             <td>${op.total_cortes || '-'}</td>
             <td>
                 <button onclick="abrirModalHistorial(${idx})" style="background:#3498db;color:white;border:none;padding:5px 12px;border-radius:4px;cursor:pointer;font-size:11px;">Ver Detalle</button>
@@ -537,9 +545,22 @@ async function ejecutarRollback() {
     const fecha = new Date(operacionSeleccionada.fecha);
     const fechaStr = `${String(fecha.getDate()).padStart(2,"0")}/${String(fecha.getMonth()+1).padStart(2,"0")}/${fecha.getFullYear()} ${String(fecha.getHours()).padStart(2,"0")}:${String(fecha.getMinutes()).padStart(2,"0")}`;
 
+    // Pedir motivo del error (dato para futura IA)
+    const motivoError = prompt(
+        `⚠️ ROLLBACK — ${fechaStr}\n\n` +
+        `¿Cuál fue el error?\n` +
+        `(Este dato entrenará a la IA en el futuro)\n\n` +
+        `Describe brevemente qué salió mal:`
+    );
+    if (motivoError === null || motivoError.trim() === "") {
+        alert("Rollback cancelado. Debes ingresar un motivo para continuar.");
+        return;
+    }
+
     const confirmar = confirm(
         `⚠️ OPERACIÓN DESTRUCTIVA ⚠️\n\n` +
         `Vas a REVERTIR el inventario de "${usuarioSeleccionado}" al estado previo a la operación del ${fechaStr}.\n\n` +
+        `Motivo: "${motivoError.trim()}"\n\n` +
         `Esto SOBREESCRIBIRÁ:\n` +
         `• Colmenas (colmena_final)\n` +
         `• Maestro de Seriales (maestro_seriales)\n\n` +
@@ -609,7 +630,19 @@ async function ejecutarRollback() {
         if (insertCount > 0) await batchInsert.commit();
         console.log(`✅ ${snapshotSeriales.length} seriales restaurados`);
 
-        alert(`Rollback completado exitosamente.\n\n• ${snapshotColmenas.length} colmenas restauradas\n• ${snapshotSeriales.length} seriales restaurados`);
+        // 3. Etiquetar el documento del historial como REVERTIDO
+        const historialDocRef = window.fbDoc(
+            db, "usuarios", usuarioSeleccionado, "historial_operaciones", operacionSeleccionada.id
+        );
+        await window.fbUpdateDoc(historialDocRef, {
+            estado: "REVERTIDO",
+            motivo_error: motivoError.trim(),
+            fecha_reversion: new Date().toISOString(),
+            revertido_por: window.fbAuth.currentUser.email
+        });
+        console.log(`🏷️ Historial etiquetado como REVERTIDO: ${operacionSeleccionada.id}`);
+
+        alert(`Rollback completado exitosamente.\n\nMotivo: "${motivoError.trim()}"\n\n• ${snapshotColmenas.length} colmenas restauradas\n• ${snapshotSeriales.length} seriales restaurados`);
         cerrarModal();
 
     } catch (error) {
