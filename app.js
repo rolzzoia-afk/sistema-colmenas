@@ -7,6 +7,8 @@ function limpiarNumero(valor) {
     return isNaN(num) ? 0 : num;
 }
 
+const VERSION_ACTUAL = "1.0";
+
 const MM_TUBO_ORIGINAL = 5780;
 const MM_KERF = 3;
 const STOCK_MINIMO = 10; // Umbral de alerta: códigos con ≤ este número de tubos enteros disponibles
@@ -37,6 +39,15 @@ let colmenaActual = null;        // Colmena descargada de Firebase al inicio de 
 let usandoColmenaManual = false; // true si el usuario subió un archivo manualmente
 let serialesDisponibles = [];    // Seriales disponibles cargados desde Firebase
 
+// Flags de carga inicial para onSnapshot (escudo anti-inventario-vacío)
+let inventarioCargado = false;
+let serialesCargados = false;
+let procesandoExcel = false;     // true mientras el usuario procesa un archivo Excel
+
+// Desuscriptores de onSnapshot para limpiar al cerrar sesión
+let unsubInventario = null;
+let unsubSeriales = null;
+
 function formatearFecha(fecha) {
     if (!fecha || fecha === '-' || fecha === 'undefined' || fecha === null) return '-';
     // Si es número serie de Excel (46083 -> 04/03/2026)
@@ -49,6 +60,25 @@ function formatearFecha(fecha) {
     if (isNaN(d.getTime())) return String(fecha).includes('/') ? fecha : '-';
     return `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}/${d.getFullYear()}`;
 }
+// Verificar versión mínima contra Firebase
+async function verificarVersionMinima() {
+    try {
+        const db = window.firebaseDb;
+        const versionDoc = await window.firebaseGetDoc(window.firebaseDoc(db, "configuracion", "version_minima"));
+        if (versionDoc.exists()) {
+            const versionMinima = versionDoc.data().version;
+            if (versionMinima && VERSION_ACTUAL < versionMinima) {
+                console.warn(`Versión ${VERSION_ACTUAL} obsoleta. Mínima requerida: ${versionMinima}`);
+                localStorage.clear();
+                alert("Hay una nueva versión del sistema. Se recargará la página.");
+                window.location.reload(true);
+            }
+        }
+    } catch (error) {
+        console.error("Error verificando versión mínima:", error);
+    }
+}
+
 // Verificar sesión activa
 document.addEventListener("DOMContentLoaded", () => {
 
@@ -56,21 +86,23 @@ document.addEventListener("DOMContentLoaded", () => {
     if (window.firebaseAuth) {
       clearInterval(esperarFirebase);
 
-      window.firebaseOnAuth(window.firebaseAuth, async (user) => {
+      // Verificar versión mínima antes de continuar
+      verificarVersionMinima();
+
+      window.firebaseOnAuth(window.firebaseAuth, (user) => {
         if (!user) {
+          // Limpiar listeners al cerrar sesión
+          if (unsubInventario) { unsubInventario(); unsubInventario = null; }
+          if (unsubSeriales) { unsubSeriales(); unsubSeriales = null; }
+          inventarioCargado = false;
+          serialesCargados = false;
           mostrarLogin();
         } else {
           console.log("Usuario logueado:", user.email);
 
-          // Cargar datos desde Firestore
-          await cargarDesdeFirestore();
-          actualizarTablaOrdenes();
-          actualizarTablaColmenas();
-          actualizarTablaCatalogo();
-          
-          // Cargar seriales desde Firestore
-          await cargarSerialesDesdeFirestore();
-          actualizarTablaSeriales();
+          // Suscribir listeners en tiempo real (onSnapshot)
+          cargarDesdeFirestore();
+          cargarSerialesDesdeFirestore();
 
           // 🔐 Logout
           const btn = document.getElementById("btnLogout");
@@ -133,45 +165,93 @@ async function guardarEnFirestore() {
     }
 }
 
-// Función para cargar desde Firestore
-async function cargarDesdeFirestore() {
+// Controla el escudo de carga inicial: deshabilita inputs hasta que los datos estén listos
+function actualizarEscudoCarga() {
+    const listo = inventarioCargado && serialesCargados;
+    // Habilitar/deshabilitar inputs de archivos Excel
+    ['fileOrdenes', 'fileColmenas', 'fileCatalogo', 'fileEstructura'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.disabled = !listo;
+    });
+    // Ocultar overlay cuando todo esté listo
+    if (listo) {
+        document.getElementById('loading-overlay').style.display = 'none';
+        verificarListo();
+        console.log("✅ Datos iniciales cargados — interfaz habilitada");
+    }
+}
+
+// Función para cargar desde Firestore con suscripción en tiempo real (onSnapshot)
+function cargarDesdeFirestore() {
     document.getElementById('loading-overlay').style.display = 'flex';
 
-    try {
-        const user = window.firebaseAuth.currentUser;
-        if (!user || !user.email) {
-            console.log("No hay usuario logueado para cargar desde Firestore");
-            return;
-        }
-
-        const db = window.firebaseDb;
-        const docRef = window.firebaseDoc(db, "usuarios", user.email, "inventario", "datos");
-
-        // Usar getDocFromServer para forzar lectura sin caché y evitar datos obsoletos
-        const docSnap = await window.firebaseGetDocFromServer(docRef);
-
-        if (docSnap && docSnap.exists()) {
-            const docData = docSnap.data();
-            if (docData && docData.data) {
-                const datos = JSON.parse(docData.data);
-                Object.assign(SistemaInventario, datos);
-                console.log("✅ Inventario cargado correctamente desde Firestore");
-            } else {
-                console.log("El documento existe pero no contiene datos válidos");
-            }
-        } else {
-            console.log("No hay inventario guardado aún en Firestore");
-        }
-
-        // Cargar colmena_final y registrar listener real-time
-        await cargarColmenaFinalDesdeFirestore();
-
-    } catch (error) {
-        console.error("Error cargando desde Firestore:", error);
-        log("❌ Error cargando desde Firestore: " + error.message, "error");
-    } finally {
+    const user = window.firebaseAuth.currentUser;
+    if (!user || !user.email) {
+        console.log("No hay usuario logueado para cargar desde Firestore");
         document.getElementById('loading-overlay').style.display = 'none';
+        return;
     }
+
+    const db = window.firebaseDb;
+    const docRef = window.firebaseDoc(db, "usuarios", user.email, "inventario", "datos");
+
+    // Desuscribir listener anterior si existe (ej. cambio de sesión)
+    if (unsubInventario) unsubInventario();
+
+    // Suscripción en tiempo real al inventario principal
+    unsubInventario = window.firebaseOnSnapshot(
+        docRef,
+        { includeMetadataChanges: false },
+        (snap) => {
+            // Ignorar escrituras locales pendientes para evitar doble procesamiento
+            if (snap.metadata.hasPendingWrites) return;
+
+            if (snap.exists()) {
+                const docData = snap.data();
+                if (docData && docData.data) {
+                    const datos = JSON.parse(docData.data);
+                    // Preservar colmenas si ya están gestionadas por el listener de colmena_final
+                    const colmenasActuales = SistemaInventario.colmenas;
+                    Object.assign(SistemaInventario, datos);
+                    if (colmenaActual && colmenaActual.length > 0) {
+                        SistemaInventario.colmenas = colmenasActuales;
+                    }
+
+                    // Actualizar UI solo si no se está procesando un Excel
+                    if (!procesandoExcel) {
+                        actualizarTablaOrdenes();
+                        actualizarTablaCatalogo();
+                        verificarListo();
+                    }
+
+                    if (!inventarioCargado) {
+                        inventarioCargado = true;
+                        console.log("✅ Inventario cargado (primer snapshot)");
+                        actualizarEscudoCarga();
+                    } else {
+                        console.log("🔄 Inventario actualizado en tiempo real");
+                    }
+                }
+            } else {
+                console.log("No hay inventario guardado aún en Firestore");
+                if (!inventarioCargado) {
+                    inventarioCargado = true;
+                    actualizarEscudoCarga();
+                }
+            }
+        },
+        (error) => {
+            console.error("Error en listener onSnapshot de inventario:", error.code, error.message);
+            // Si falla el listener, marcar como cargado para no bloquear la UI indefinidamente
+            if (!inventarioCargado) {
+                inventarioCargado = true;
+                actualizarEscudoCarga();
+            }
+        }
+    );
+
+    // Cargar colmena_final y registrar listener real-time
+    cargarColmenaFinalDesdeFirestore();
 }
 
 // Función para guardar resultados de optimización en Firestore
@@ -386,9 +466,9 @@ cargarSistema();
 async function cargarEstructuraInventario(event) {
     const file = event.target.files[0];
     if (!file) return;
-    
+    procesandoExcel = true;
     document.getElementById('loading-overlay').style.display = 'flex';
-    
+
     try {
         const datos = await leerExcelCompleto(file);
         const filaEncabezado = detectarFilaEncabezado(datos);
@@ -502,6 +582,7 @@ async function cargarEstructuraInventario(event) {
         alert('Error: ' + e.message);
         console.error(e);
     } finally {
+        procesandoExcel = false;
         document.getElementById('loading-overlay').style.display = 'none';
     }
 }
@@ -612,91 +693,107 @@ const batch = window.firebaseWriteBatch(window.firebaseDb);
 }
 
 
-// Función para cargar los seriales desde Firestore
-async function cargarSerialesDesdeFirestore() {
-    try {
-        const user = window.firebaseAuth.currentUser;
-        if (!user) return;
+// Lógica de ordenamiento de seriales (extraída para reutilizar)
+function ordenarSeriales(seriales) {
+    seriales.sort((a, b) => {
+        // Por fecha (más antigua primero)
+        const fechaA = new Date(a.fecha);
+        const fechaB = new Date(b.fecha);
+        if (fechaA < fechaB) return -1;
+        if (fechaA > fechaB) return 1;
 
-        const db = window.firebaseDb;
-        
-        try {
-            const coleccionRef = window.firebaseCollection(db, "usuarios", user.email, "maestro_seriales");
-            const querySnapshot = await window.firebaseGetDocs(coleccionRef);
-            
-            if (!querySnapshot.empty) {
-                SistemaInventario.seriales = [];
-                
-                querySnapshot.forEach(doc => {
-                    const data = doc.data();
-                    SistemaInventario.seriales.push({
-                        fecha: data.fecha,
-                        codigo: data.codigo,
-                        lote: data.lote,
-                        paquete: data.paquete,
-                        serial: data.serial,
-                        estado: data.estado || 'disponible'
-                    });
+        // Por lote
+        const loteANum = parseInt(a.lote);
+        const loteBNum = parseInt(b.lote);
+        if (!isNaN(loteANum) && !isNaN(loteBNum)) {
+            if (loteANum < loteBNum) return -1;
+            if (loteANum > loteBNum) return 1;
+        } else {
+            const cmpLote = a.lote.localeCompare(b.lote);
+            if (cmpLote !== 0) return cmpLote;
+        }
+
+        // Por paquete
+        const paqueteANum = parseInt(a.paquete);
+        const paqueteBNum = parseInt(b.paquete);
+        if (!isNaN(paqueteANum) && !isNaN(paqueteBNum)) {
+            if (paqueteANum < paqueteBNum) return -1;
+            if (paqueteANum > paqueteBNum) return 1;
+        } else {
+            const cmpPaquete = a.paquete.localeCompare(b.paquete);
+            if (cmpPaquete !== 0) return cmpPaquete;
+        }
+
+        // Por serial
+        const serialANum = parseInt(a.serial);
+        const serialBNum = parseInt(b.serial);
+        if (!isNaN(serialANum) && !isNaN(serialBNum)) {
+            return serialANum - serialBNum;
+        }
+        return a.serial.localeCompare(b.serial);
+    });
+}
+
+// Función para cargar los seriales desde Firestore con suscripción en tiempo real
+function cargarSerialesDesdeFirestore() {
+    const user = window.firebaseAuth.currentUser;
+    if (!user) return;
+
+    const db = window.firebaseDb;
+
+    // Desuscribir listener anterior si existe
+    if (unsubSeriales) unsubSeriales();
+
+    const coleccionRef = window.firebaseCollection(db, "usuarios", user.email, "maestro_seriales");
+
+    unsubSeriales = window.firebaseOnSnapshot(
+        coleccionRef,
+        { includeMetadataChanges: false },
+        (querySnapshot) => {
+            SistemaInventario.seriales = [];
+
+            querySnapshot.forEach(doc => {
+                const data = doc.data();
+                SistemaInventario.seriales.push({
+                    fecha: data.fecha,
+                    codigo: data.codigo,
+                    lote: data.lote,
+                    paquete: data.paquete,
+                    serial: data.serial,
+                    estado: data.estado || 'disponible'
                 });
-                
-                // Ordenar los seriales
-                SistemaInventario.seriales.sort((a, b) => {
-                    // Por fecha (más antigua primero)
-                    const fechaA = new Date(a.fecha);
-                    const fechaB = new Date(b.fecha);
-                    if (fechaA < fechaB) return -1;
-                    if (fechaA > fechaB) return 1;
-                    
-                    // Por lote
-                    const loteANum = parseInt(a.lote);
-                    const loteBNum = parseInt(b.lote);
-                    if (!isNaN(loteANum) && !isNaN(loteBNum)) {
-                        if (loteANum < loteBNum) return -1;
-                        if (loteANum > loteBNum) return 1;
-                    } else {
-                        const cmpLote = a.lote.localeCompare(b.lote);
-                        if (cmpLote !== 0) return cmpLote;
-                    }
-                    
-                    // Por paquete
-                    const paqueteANum = parseInt(a.paquete);
-                    const paqueteBNum = parseInt(b.paquete);
-                    if (!isNaN(paqueteANum) && !isNaN(paqueteBNum)) {
-                        if (paqueteANum < paqueteBNum) return -1;
-                        if (paqueteANum > paqueteBNum) return 1;
-                    } else {
-                        const cmpPaquete = a.paquete.localeCompare(b.paquete);
-                        if (cmpPaquete !== 0) return cmpPaquete;
-                    }
-                    
-                    // Por serial
-                    const serialANum = parseInt(a.serial);
-                    const serialBNum = parseInt(b.serial);
-                    if (!isNaN(serialANum) && !isNaN(serialBNum)) {
-                        return serialANum - serialBNum;
-                    }
-                    return a.serial.localeCompare(b.serial);
-                });
-                
-                console.log(`✅ ${SistemaInventario.seriales.length} seriales cargados desde Firestore`);
-                
-                // Actualizar la tabla, el estado y las alertas de stock
+            });
+
+            ordenarSeriales(SistemaInventario.seriales);
+
+            // Actualizar UI solo si no se está procesando un Excel
+            if (!procesandoExcel) {
                 actualizarTablaSeriales();
                 verificarAlertasStock();
-                const estadoEl = document.getElementById('estadoEstructura');
-                if (estadoEl) {
-                    estadoEl.textContent = `✓ ${SistemaInventario.seriales.length} seriales (sincronizados)`;
-                    estadoEl.className = 'estado-archivo estado-ok';
-                }
-            } else {
-                console.log("No hay seriales guardados en Firestore");
             }
-        } catch (error) {
-            console.error("Error cargando seriales desde Firestore:", error);
+
+            const estadoEl = document.getElementById('estadoEstructura');
+            if (estadoEl) {
+                estadoEl.textContent = `✓ ${SistemaInventario.seriales.length} seriales (sincronizados)`;
+                estadoEl.className = 'estado-archivo estado-ok';
+            }
+
+            if (!serialesCargados) {
+                serialesCargados = true;
+                console.log(`✅ ${SistemaInventario.seriales.length} seriales cargados (primer snapshot)`);
+                actualizarEscudoCarga();
+            } else {
+                console.log(`🔄 Seriales actualizados en tiempo real: ${SistemaInventario.seriales.length}`);
+            }
+        },
+        (error) => {
+            console.error("Error en listener onSnapshot de seriales:", error.code, error.message);
+            if (!serialesCargados) {
+                serialesCargados = true;
+                actualizarEscudoCarga();
+            }
         }
-    } catch (error) {
-        console.error("Error general cargando seriales:", error);
-    }
+    );
 }
 
 // Función para buscar un serial disponible para un código específico
@@ -1281,6 +1378,7 @@ function expandirOrdenesDesdeExcel() {
 async function cargarOrdenes(event) {
     const file = event.target.files[0];
     if (!file) return;
+    procesandoExcel = true;
     try {
         SistemaInventario.datosCrudosOrdenes = await leerExcelCompleto(file);
 
@@ -1294,11 +1392,13 @@ async function cargarOrdenes(event) {
         guardarSistema();
         guardarEnFirestore();
     } catch (e) { alert('Error: ' + e.message); console.error(e); }
+    finally { procesandoExcel = false; }
 }
 
 async function cargarColmenas(event) {
     const file = event.target.files[0];
     if (!file) return;
+    procesandoExcel = true;
     try {
         const datos = await leerExcelCompleto(file);
         const filaEncabezado = detectarFilaEncabezado(datos);
@@ -1345,11 +1445,13 @@ async function cargarColmenas(event) {
         SistemaInventario.colmenaCruda = JSON.parse(JSON.stringify(SistemaInventario.colmenas));
         guardarSistema();
     } catch (e) { alert('Error: ' + e.message); }
+    finally { procesandoExcel = false; }
 }
 
 async function cargarCatalogo(event) {
     const file = event.target.files[0];
     if (!file) return;
+    procesandoExcel = true;
     try {
         const datos = await leerExcelCompleto(file);
         const filaEncabezado = detectarFilaEncabezado(datos);
@@ -1408,6 +1510,7 @@ async function cargarCatalogo(event) {
         guardarSistema();
         actualizarTablaOrdenes(); // Refrescar tabla para mostrar colores en órdenes ya cargadas
     } catch (e) { alert('Error: ' + e.message); }
+    finally { procesandoExcel = false; }
 }
 
 // Devuelve el color de un código desde el catálogo, normalizando el código antes de buscar

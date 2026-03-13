@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Panel de Administrador - Ojo de Dios</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Segoe UI', sans-serif; background: #1a1a2e; color: #eee; min-height: 100vh; }
+
+        /* Navbar */
+        .navbar {
+            background: linear-gradient(135deg, #0f0c29, #302b63, #24243e);
+            padding: 15px 30px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            box-shadow: 0 2px 15px rgba(0,0,0,0.5);
+            border-bottom: 2px solid #e74c3c;
+        }
+        .navbar h1 { font-size: 20px; color: #fff; letter-spacing: 1px; }
+        .navbar h1 span { color: #e74c3c; }
+        .navbar-user { color: #aaa; font-size: 13px; }
+        .btn-logout {
+            background: #e74c3c; color: white; border: none; padding: 8px 18px;
+            border-radius: 5px; cursor: pointer; font-size: 13px;
+        }
+        .btn-logout:hover { background: #c0392b; }
+
+        /* Layout */
+        .main { max-width: 1400px; margin: 0 auto; padding: 25px; }
+
+        /* Panels */
+        .panel {
+            background: #16213e; border-radius: 10px; padding: 25px;
+            margin-bottom: 25px; box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+            border: 1px solid #1a1a4e;
+        }
+        .panel h2 { color: #ecf0f1; margin-bottom: 15px; font-size: 18px; border-bottom: 1px solid #2c3e6e; padding-bottom: 10px; }
+
+        /* Version display */
+        .version-display {
+            display: flex; align-items: center; gap: 20px; flex-wrap: wrap;
+        }
+        .version-badge {
+            background: #0a3d62; color: #00d2ff; font-size: 28px; font-weight: bold;
+            padding: 15px 30px; border-radius: 10px; border: 2px solid #00d2ff;
+            font-family: 'Courier New', monospace;
+        }
+        .version-label { color: #aaa; font-size: 14px; }
+
+        /* Danger button */
+        .btn-danger {
+            background: linear-gradient(135deg, #c0392b, #e74c3c);
+            color: white; border: 2px solid #e74c3c; padding: 14px 28px;
+            border-radius: 8px; cursor: pointer; font-size: 15px; font-weight: bold;
+            letter-spacing: 0.5px; transition: all 0.2s;
+        }
+        .btn-danger:hover { background: linear-gradient(135deg, #a93226, #c0392b); transform: scale(1.02); }
+        .btn-danger:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+
+        /* User selector */
+        .user-selector {
+            display: flex; align-items: center; gap: 15px; margin-bottom: 15px; flex-wrap: wrap;
+        }
+        .user-selector select {
+            background: #0a3d62; color: #eee; border: 1px solid #2c3e6e; padding: 10px 15px;
+            border-radius: 5px; font-size: 14px; min-width: 250px;
+        }
+        .user-selector label { color: #aaa; font-size: 14px; }
+
+        /* Stats bar */
+        .stats-bar {
+            display: flex; gap: 15px; margin-bottom: 15px; flex-wrap: wrap;
+        }
+        .stat-card {
+            background: #0a3d62; padding: 12px 20px; border-radius: 8px;
+            text-align: center; min-width: 120px; border: 1px solid #1a4a7a;
+        }
+        .stat-card .num { font-size: 24px; font-weight: bold; color: #00d2ff; }
+        .stat-card .lbl { font-size: 11px; color: #aaa; margin-top: 3px; }
+
+        /* Table */
+        .tabla-container { max-height: 600px; overflow-y: auto; border-radius: 8px; }
+        table { width: 100%; border-collapse: collapse; }
+        th {
+            background: #0a3d62; color: #00d2ff; padding: 10px 12px;
+            text-align: left; font-size: 12px; text-transform: uppercase;
+            letter-spacing: 0.5px; position: sticky; top: 0; z-index: 1;
+        }
+        td { padding: 8px 12px; font-size: 12px; border-bottom: 1px solid #1a1a4e; }
+        tr:hover td { background: rgba(0, 210, 255, 0.05); }
+        .badge-disponible { background: #27ae60; color: white; padding: 2px 8px; border-radius: 3px; font-size: 10px; }
+        .badge-ocupado { background: #e74c3c; color: white; padding: 2px 8px; border-radius: 3px; font-size: 10px; }
+
+        /* Login */
+        .login-container {
+            display: flex; justify-content: center; align-items: center;
+            height: 100vh; flex-direction: column; gap: 12px;
+        }
+        .login-container h2 { color: #ecf0f1; }
+        .login-container input {
+            padding: 10px 15px; border-radius: 5px; border: 1px solid #2c3e6e;
+            background: #16213e; color: #eee; font-size: 14px; width: 280px;
+        }
+        .login-container button {
+            background: #e74c3c; color: white; padding: 10px 30px; border: none;
+            border-radius: 5px; cursor: pointer; font-size: 14px;
+        }
+        .login-container .error { color: #e74c3c; font-size: 13px; }
+
+        /* Loading */
+        .loading-msg { color: #aaa; text-align: center; padding: 40px; font-size: 14px; }
+
+        /* Scrollbar */
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: #1a1a2e; }
+        ::-webkit-scrollbar-thumb { background: #2c3e6e; border-radius: 4px; }
+    </style>
+</head>
+<body>
+
+<div id="app-container" style="display:none;">
+    <!-- Navbar -->
+    <nav class="navbar">
+        <h1>Panel de Administrador — <span>Ojo de Dios</span></h1>
+        <div style="display:flex; align-items:center; gap:15px;">
+            <span class="navbar-user" id="adminEmail"></span>
+            <button class="btn-logout" id="btnLogout">Cerrar sesión</button>
+        </div>
+    </nav>
+
+    <div class="main">
+        <!-- Sección 1: Control de Sistema -->
+        <div class="panel">
+            <h2>Control de Sistema</h2>
+            <div class="version-display">
+                <div>
+                    <div class="version-label">Versión mínima requerida en Firebase</div>
+                    <div class="version-badge" id="versionActual">...</div>
+                </div>
+                <button class="btn-danger" id="btnForzarUpdate" disabled>
+                    Forzar Actualización en Taller (Subir Versión)
+                </button>
+            </div>
+        </div>
+
+        <!-- Sección 2: Inventario en Vivo -->
+        <div class="panel">
+            <h2>Inventario en Vivo</h2>
+
+            <div class="user-selector">
+                <label>Usuario del taller:</label>
+                <select id="selectUsuario">
+                    <option value="">Cargando usuarios...</option>
+                </select>
+            </div>
+
+            <div class="stats-bar" id="statsBar">
+                <div class="stat-card"><div class="num" id="statTotal">0</div><div class="lbl">Tubos Total</div></div>
+                <div class="stat-card"><div class="num" id="statDisponibles">0</div><div class="lbl">Disponibles</div></div>
+                <div class="stat-card"><div class="num" id="statOcupados">0</div><div class="lbl">Ocupados</div></div>
+                <div class="stat-card"><div class="num" id="statCodigos">0</div><div class="lbl">Códigos</div></div>
+            </div>
+
+            <div class="tabla-container">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Código</th>
+                            <th>Medida (cm)</th>
+                            <th>Colmena</th>
+                            <th>Lote</th>
+                            <th>Serial</th>
+                            <th>Fecha</th>
+                            <th>Estado</th>
+                        </tr>
+                    </thead>
+                    <tbody id="tbodyInventario">
+                        <tr><td colspan="7" class="loading-msg">Seleccione un usuario para ver su inventario</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Firebase SDK -->
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+  import {
+    getAuth,
+    signInWithEmailAndPassword,
+    onAuthStateChanged,
+    signOut
+  } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
+  import {
+    getFirestore,
+    collection,
+    getDocs,
+    getDoc,
+    onSnapshot,
+    doc,
+    setDoc
+  } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+
+  const firebaseConfig = {
+    apiKey: "AIzaSyBUQVqyC3ti4hLbuBT8U4zINUWU3u07Dmw",
+    authDomain: "inventario-colmenas.firebaseapp.com",
+    projectId: "inventario-colmenas",
+    storageBucket: "inventario-colmenas.firebasestorage.app",
+    messagingSenderId: "412114089031",
+    appId: "1:412114089031:web:de2aedf856272598ae6d62"
+  };
+
+  const app = initializeApp(firebaseConfig);
+  const auth = getAuth(app);
+  const db = getFirestore(app);
+
+  // Exportar para admin.js
+  window.fbAuth = auth;
+  window.fbDb = db;
+  window.fbSignIn = signInWithEmailAndPassword;
+  window.fbOnAuth = onAuthStateChanged;
+  window.fbSignOut = signOut;
+  window.fbCollection = collection;
+  window.fbGetDocs = getDocs;
+  window.fbGetDoc = getDoc;
+  window.fbOnSnapshot = onSnapshot;
+  window.fbDoc = doc;
+  window.fbSetDoc = setDoc;
+
+  console.log("🔥 Firebase Admin inicializado.");
+</script>
+
+<script src="admin.js"></script>
+</body>
+</html>
