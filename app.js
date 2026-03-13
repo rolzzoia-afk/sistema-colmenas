@@ -2490,10 +2490,122 @@ function ejecutarOptimizacion() {
     actualizarTablaColmenasResultado();
     actualizarTablaMermas();
 
-    document.getElementById('btnExportarDisponibles').disabled = false;
-    log('=== COMPLETADO ===', 'success');
+    log('=== CÁLCULO COMPLETADO — Revise la Vista Previa ===', 'success');
 
-    let html = '<div class="resumen-resultado"><h3>✓ Optimización Completada</h3>';
+    // Renderizar panel de staging (vista previa)
+    renderizarStaging(resultados);
+
+    // Actualizar alertas de stock (informativo, aún no guardado)
+    verificarAlertasStock();
+}
+
+// ═══ STAGING: VISTA PREVIA ANTES DE GUARDAR ═══════════════════════════════
+
+function renderizarStaging(resultados) {
+    const panel = document.getElementById('panel-vista-previa');
+    panel.style.display = 'block';
+    panel.scrollIntoView({ behavior: 'smooth' });
+
+    // ── Sección A: Órdenes de Entrada ──
+    const tbodyOrdenes = document.getElementById('tbodyStagingOrdenes');
+    tbodyOrdenes.innerHTML = SistemaInventario.ordenes.map((o, i) => `<tr>
+        <td>${i + 1}</td>
+        <td>${o.ot || '-'}</td>
+        <td>${o.ubic || '-'}</td>
+        <td>${o.cod || '-'}</td>
+        <td>${o.medida_cm || '-'}</td>
+        <td>${o.componente || '-'}</td>
+    </tr>`).join('');
+
+    // ── Sección B: Inventario a Consumir ──
+    const tbodyConsumo = document.getElementById('tbodyStagingConsumo');
+    const consumidos = SistemaInventario.colmenasHistorico.filter(c => c.estado === 'usada' || c.origen.includes('MERMA'));
+    tbodyConsumo.innerHTML = consumidos.map(c => {
+        let tipo = '';
+        if (c.origen.includes('MERMA')) tipo = '<span style="color:#e74c3c;">MERMA</span>';
+        else tipo = '<span style="color:#2c3e50;">CORTE</span>';
+        return `<tr>
+            <td>${c.n_colmena || '-'}</td>
+            <td>${c.cod || '-'}</td>
+            <td>${c.medida_cm || '-'}</td>
+            <td>${c.origen || '-'}</td>
+            <td>${tipo}</td>
+        </tr>`;
+    }).join('') || '<tr><td colspan="5">Ningún tubo consumido</td></tr>';
+
+    // ── Sección C: Resultado del Plan ──
+    const tbodyPlan = document.getElementById('tbodyStagingPlan');
+    tbodyPlan.innerHTML = resultados.map(r => {
+        const ordenOriginal = SistemaInventario.ordenes[r.orden - 1] || {};
+        const color = obtenerColorDeCatalogo(r.codigo) || ordenOriginal.color || '';
+        let accion = r.fuente.toUpperCase();
+        let badgeStyle = '';
+        if (r.fuente === 'tubo_nuevo') badgeStyle = 'background:#f39c12;color:white;padding:2px 8px;border-radius:3px;';
+        else if (r.fuente === 'reemplazo') badgeStyle = 'background:#3498db;color:white;padding:2px 8px;border-radius:3px;';
+        else badgeStyle = 'background:#9b59b6;color:white;padding:2px 8px;border-radius:3px;';
+
+        let filas = `<tr>
+            <td>${r.colmena || r.nombreMaterialNuevo || '-'}</td>
+            <td>${r.codigo || '-'}</td>
+            <td>${color}</td>
+            <td>${formatearValor(r.medida_cm)}</td>
+            <td>${formatearValor(r.medida_origen)}</td>
+            <td>${formatearValor(r.sobrante_cm)}</td>
+            <td><span style="${badgeStyle}">${accion}</span></td>
+        </tr>`;
+
+        // Fila de sobrante si aplica
+        if (r.sobrante_cm > 0) {
+            let accionSobrante, estilo;
+            if (r.es_intermedio) {
+                accionSobrante = 'RESERVAR EN MESA';
+                estilo = 'background:#fff3e0;color:#e65100;';
+            } else if (r.es_desecho) {
+                accionSobrante = 'DESECHAR MERMA';
+                estilo = 'background:#ffebee;color:#c62828;';
+            } else {
+                accionSobrante = 'GUARDAR SOBRANTE';
+                estilo = 'background:#e8f5e9;color:#2e7d32;';
+            }
+            filas += `<tr style="${estilo}">
+                <td>${r.colmena_sobrante || '-'}</td>
+                <td>${r.codigo || '-'}</td>
+                <td></td>
+                <td colspan="2">${formatearValor(r.sobrante_cm)} cm</td>
+                <td></td>
+                <td><strong>${accionSobrante}</strong></td>
+            </tr>`;
+        }
+        return filas;
+    }).join('');
+
+    // ── Resumen rápido en el panel principal de resultados ──
+    let html = '<div class="resumen-resultado"><h3>🔍 Vista Previa Generada</h3>';
+    html += `<p>Se calcularon <strong>${resultados.length}</strong> cortes. Revise el panel de vista previa abajo y confirme para guardar.</p>`;
+    html += '</div>';
+    document.getElementById('resultados').innerHTML = html;
+}
+
+// ── Confirmar: guardar en Firebase + descargar Excel ──
+function confirmarYGuardarStaging() {
+    log('💾 Confirmado. Guardando en Firebase...', 'info');
+
+    guardarSistema();
+    guardarColmenaFinalEnFirestore();
+
+    // Habilitar botones de exportación
+    document.getElementById('btnExportar').disabled = false;
+    document.getElementById('btnExportarDisponibles').disabled = false;
+
+    // Descargar Excel automáticamente
+    exportarResultados();
+
+    // Ocultar panel de staging
+    document.getElementById('panel-vista-previa').style.display = 'none';
+
+    // Mostrar resumen final
+    const resultados = SistemaInventario.resultadosOptimizacion.map(item => item.resultado);
+    let html = '<div class="resumen-resultado"><h3>✓ Optimización Confirmada y Guardada</h3>';
     resultados.forEach(r => {
         let badge = 'badge';
         let clasificacion = r.fuente.toUpperCase();
@@ -2506,25 +2618,50 @@ function ejecutarOptimizacion() {
         const color = ordenOriginal.color || '';
         const tituloOrden = ot ? `OT ${ot}` : `Orden ${r.orden}`;
         const codigo = r.codigo || r.codigo_original || '';
-        
+
         let infoReemplazo = '';
         if (r.fuente === 'reemplazo' && r.codigo_original && r.codigo_reemplazo) {
             infoReemplazo = ` <span style="color: #3498db;">[${r.codigo_original} → ${r.codigo_reemplazo}]</span>`;
         }
-        
+
         html += `<p><strong>${tituloOrden}</strong>${ubic ? ` [${ubic}]` : ''}${color ? ` [${color}]` : ''}: ${formatearValor(r.medida_cm)}cm ${codigo ? `(${codigo})` : ''}${infoReemplazo} → <span class="${badge}">${clasificacion}</span> | Sobrante: ${formatearValor(r.sobrante_cm)}cm</p>`;
     });
     html += '</div>';
     document.getElementById('resultados').innerHTML = html;
-    document.getElementById('btnExportar').disabled = false;
-    guardarSistema();
 
-    // Guardar colmena final en Firebase para que sea la base del día siguiente
-    log('💾 Guardando colmena final en Firebase...', 'info');
-    guardarColmenaFinalEnFirestore();
+    log('✅ Inventario guardado y Excel descargado.', 'success');
+}
 
-    // Actualizar alertas de stock en tiempo real tras consumir tubos
-    verificarAlertasStock();
+// ── Descartar: volver al estado previo sin guardar ──
+function descartarStaging() {
+    if (!confirm('¿Descartar la vista previa? Los cambios calculados se perderán.')) return;
+
+    document.getElementById('panel-vista-previa').style.display = 'none';
+    document.getElementById('resultados').innerHTML = '';
+    document.getElementById('btnExportar').disabled = true;
+    document.getElementById('btnExportarDisponibles').disabled = true;
+
+    // Restaurar estado pre-optimización
+    if (SistemaInventario.ordenesCrudas.length > 0) {
+        SistemaInventario.ordenes = JSON.parse(JSON.stringify(SistemaInventario.ordenesCrudas));
+    }
+    if (SistemaInventario.serialesCrudos.length > 0) {
+        SistemaInventario.seriales = JSON.parse(JSON.stringify(SistemaInventario.serialesCrudos));
+    }
+    if (SistemaInventario.colmenaCruda.length > 0) {
+        SistemaInventario.colmenas = JSON.parse(JSON.stringify(SistemaInventario.colmenaCruda));
+    } else if (colmenaActual && colmenaActual.length > 0) {
+        SistemaInventario.colmenas = JSON.parse(JSON.stringify(colmenaActual));
+    }
+
+    SistemaInventario.resultadosOptimizacion = [];
+    SistemaInventario.colmenasHistorico = [];
+    SistemaInventario.colmenasDisponibles = [];
+    SistemaInventario.mermas = [];
+
+    actualizarTablaColmenas();
+    actualizarTablaSeriales();
+    log('🗑️ Vista previa descartada. Estado restaurado.', 'info');
 }
 
 function exportarResultados() {
@@ -2864,4 +3001,11 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         });
     }
+
+    // Botones del panel de staging (vista previa)
+    const btnConfirmar = document.getElementById('btnConfirmarGuardar');
+    if (btnConfirmar) btnConfirmar.addEventListener('click', confirmarYGuardarStaging);
+
+    const btnDescartar = document.getElementById('btnDescartarPreview');
+    if (btnDescartar) btnDescartar.addEventListener('click', descartarStaging);
 });

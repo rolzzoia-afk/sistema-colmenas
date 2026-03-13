@@ -75,13 +75,70 @@
             <span id="estadoEstructura" class="estado-archivo estado-pendiente">Sin cargar</span>
         </div>
 
-        <button class="btn" onclick="ejecutarOptimizacion()" id="btnEjecutar" disabled>▶ Ejecutar</button>
+        <button class="btn" onclick="ejecutarOptimizacion()" id="btnEjecutar" disabled>🔍 Calcular Vista Previa</button>
         <button class="btn btn-exportar" onclick="exportarResultados()" id="btnExportar" disabled>📊 Exportar a Excel</button>
         <button class="btn btn-exportar" onclick="exportarColmenasDisponibles()" id="btnExportarDisponibles" disabled>📦 Exportar Colmenas Disponibles</button>
         <button class="btn btn-exportar" onclick="exportarInventarioActualizado()" style="background-color:#27ae60;">📥 Descargar Inventario Actual</button>
         <button id="btnRectificar" class="btn" style="background-color:#e67e22; color:#fff;">📐 Rectificar Tubos Nuevos</button>
 
         <div id="panelAlertasStock" style="display:none;"></div>
+    </div>
+
+    <!-- ═══ PANEL DE VISTA PREVIA (STAGING) ═══ -->
+    <div id="panel-vista-previa" style="display:none; margin-top:20px;">
+        <div style="background: linear-gradient(135deg, #f39c12, #e67e22); color: white; padding: 15px 25px; border-radius: 10px 10px 0 0; display: flex; justify-content: space-between; align-items: center;">
+            <h2 style="margin:0;">⚠️ Vista Previa — Revisar antes de guardar</h2>
+            <button id="btnDescartarPreview" class="btn" style="background:#e74c3c; padding:8px 20px; font-size:13px;">✕ Descartar</button>
+        </div>
+        <div style="background: white; padding: 20px; border-radius: 0 0 10px 10px; box-shadow: 0 4px 15px rgba(0,0,0,0.1);">
+
+            <!-- Sección A: Órdenes de Entrada -->
+            <details open>
+                <summary style="cursor:pointer; font-size:16px; font-weight:bold; color:#2c3e50; padding:10px 0;">
+                    📋 Órdenes de Entrada
+                </summary>
+                <div class="tabla-scroll" style="max-height:250px;">
+                    <table>
+                        <thead><tr><th>#</th><th>OT</th><th>Ubicación</th><th>Código</th><th>Medida (cm)</th><th>Componente</th></tr></thead>
+                        <tbody id="tbodyStagingOrdenes"></tbody>
+                    </table>
+                </div>
+            </details>
+
+            <!-- Sección B: Inventario a Consumir -->
+            <details open style="margin-top:15px;">
+                <summary style="cursor:pointer; font-size:16px; font-weight:bold; color:#2c3e50; padding:10px 0;">
+                    📦 Inventario a Consumir
+                </summary>
+                <div class="tabla-scroll" style="max-height:250px;">
+                    <table>
+                        <thead><tr><th>Colmena</th><th>Código</th><th>Medida Origen (cm)</th><th>Destino</th><th>Tipo</th></tr></thead>
+                        <tbody id="tbodyStagingConsumo"></tbody>
+                    </table>
+                </div>
+            </details>
+
+            <!-- Sección C: Resultado del Plan -->
+            <details open style="margin-top:15px;">
+                <summary style="cursor:pointer; font-size:16px; font-weight:bold; color:#2c3e50; padding:10px 0;">
+                    🔧 Resultado del Plan de Corte
+                </summary>
+                <div class="tabla-scroll" style="max-height:350px;">
+                    <table>
+                        <thead><tr><th>Colmena</th><th>Código</th><th>Color</th><th>Medida a Cortar (cm)</th><th>Tubo Origen (cm)</th><th>Sobrante (cm)</th><th>Acción</th></tr></thead>
+                        <tbody id="tbodyStagingPlan"></tbody>
+                    </table>
+                </div>
+            </details>
+
+            <!-- Botón de Confirmación -->
+            <div style="text-align:center; margin-top:25px; padding-top:20px; border-top: 2px dashed #bdc3c7;">
+                <button id="btnConfirmarGuardar" class="btn" style="background-color:#27ae60; padding:18px 40px; font-size:18px; letter-spacing:0.5px;">
+                    ✓ Confirmar, Guardar y Descargar Excel
+                </button>
+                <p style="color:#7f8c8d; font-size:12px; margin-top:8px;">Al confirmar se guardará en Firebase y se descargará el plan de corte.</p>
+            </div>
+        </div>
     </div>
 
     <div class="container">
