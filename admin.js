@@ -6,7 +6,11 @@
 let unsubVersion = null;
 let unsubColmena = null;
 let unsubSeriales = null;
+let unsubHistorial = null;
 let versionActualFirebase = null;    // Valor actual en Firebase
+let usuarioSeleccionado = null;      // Email del usuario actualmente seleccionado
+let historialOperaciones = [];       // Cache local del historial
+let operacionSeleccionada = null;    // Operación activa en el modal
 
 // ─── ESPERAR A QUE FIREBASE ESTÉ LISTO ──────────────────────────────────────
 
@@ -77,11 +81,20 @@ function inicializarPanel() {
     document.getElementById("selectUsuario").addEventListener("change", (e) => {
         const email = e.target.value;
         if (email) {
+            usuarioSeleccionado = email;
             suscribirInventarioUsuario(email);
+            suscribirHistorialUsuario(email);
         } else {
+            usuarioSeleccionado = null;
             limpiarTablaInventario();
+            limpiarTablaHistorial();
         }
     });
+
+    // Modal: botones de cerrar
+    document.getElementById("btnCerrarModal").addEventListener("click", cerrarModal);
+    document.getElementById("btnCerrarModal2").addEventListener("click", cerrarModal);
+    document.getElementById("btnRollback").addEventListener("click", ejecutarRollback);
 }
 
 // ─── MONITOR DE VERSIÓN (onSnapshot) ────────────────────────────────────────
@@ -228,15 +241,19 @@ async function cargarUsuarios() {
     // Si solo hay 1 usuario, seleccionarlo automáticamente y cargar inventario
     if (usuarios.length === 1) {
         select.value = usuarios[0];
+        usuarioSeleccionado = usuarios[0];
         console.log("👁️ Auto-seleccionando único usuario:", usuarios[0]);
         suscribirInventarioUsuario(usuarios[0]);
+        suscribirHistorialUsuario(usuarios[0]);
     } else if (usuarios.length === 0) {
         console.warn("⚠️ No se detectaron usuarios. Cargando inventario del admin como fallback global...");
         select.innerHTML = '<option value="">Sin usuarios detectados (mostrando global)</option>';
         // Fallback global: usar el email del admin logueado
         const adminEmail = window.fbAuth.currentUser?.email;
         if (adminEmail) {
+            usuarioSeleccionado = adminEmail;
             suscribirInventarioUsuario(adminEmail);
+            suscribirHistorialUsuario(adminEmail);
         }
     }
 }
@@ -387,8 +404,226 @@ function limpiarTablaInventario() {
     document.getElementById("statCodigos").textContent = "0";
 }
 
+function limpiarTablaHistorial() {
+    if (unsubHistorial) { unsubHistorial(); unsubHistorial = null; }
+    historialOperaciones = [];
+    document.getElementById("tbodyHistorial").innerHTML =
+        '<tr><td colspan="4" class="loading-msg">Seleccione un usuario para ver su historial</td></tr>';
+}
+
+// ─── HISTORIAL DE OPERACIONES (onSnapshot) ──────────────────────────────────
+
+function suscribirHistorialUsuario(email) {
+    if (unsubHistorial) { unsubHistorial(); unsubHistorial = null; }
+
+    const tbody = document.getElementById("tbodyHistorial");
+    tbody.innerHTML = '<tr><td colspan="4" class="loading-msg">Cargando historial...</td></tr>';
+
+    const colRef = window.fbCollection(window.fbDb, "usuarios", email, "historial_operaciones");
+    const q = window.fbQuery(colRef, window.fbOrderBy("fecha", "desc"));
+
+    unsubHistorial = window.fbOnSnapshot(q, (querySnap) => {
+        historialOperaciones = [];
+        querySnap.forEach(docSnap => {
+            historialOperaciones.push({ id: docSnap.id, ...docSnap.data() });
+        });
+        renderizarHistorial();
+    }, (error) => {
+        console.error("Error listener historial:", error);
+        tbody.innerHTML = '<tr><td colspan="4" class="loading-msg">Error cargando historial</td></tr>';
+    });
+}
+
+function renderizarHistorial() {
+    const tbody = document.getElementById("tbodyHistorial");
+
+    if (historialOperaciones.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="4" class="loading-msg">Sin operaciones registradas</td></tr>';
+        return;
+    }
+
+    tbody.innerHTML = historialOperaciones.map((op, idx) => {
+        const fecha = new Date(op.fecha);
+        const fechaStr = `${String(fecha.getDate()).padStart(2,"0")}/${String(fecha.getMonth()+1).padStart(2,"0")}/${fecha.getFullYear()} ${String(fecha.getHours()).padStart(2,"0")}:${String(fecha.getMinutes()).padStart(2,"0")}`;
+        return `<tr>
+            <td>${fechaStr}</td>
+            <td>${op.nombre_excel || '-'}</td>
+            <td>${op.total_cortes || '-'}</td>
+            <td>
+                <button onclick="abrirModalHistorial(${idx})" style="background:#3498db;color:white;border:none;padding:5px 12px;border-radius:4px;cursor:pointer;font-size:11px;">Ver Detalle</button>
+            </td>
+        </tr>`;
+    }).join("");
+}
+
+// ─── MODAL DE DETALLE + ROLLBACK ────────────────────────────────────────────
+
+function abrirModalHistorial(idx) {
+    operacionSeleccionada = historialOperaciones[idx];
+    if (!operacionSeleccionada) return;
+
+    const fecha = new Date(operacionSeleccionada.fecha);
+    const fechaStr = `${String(fecha.getDate()).padStart(2,"0")}/${String(fecha.getMonth()+1).padStart(2,"0")}/${fecha.getFullYear()} ${String(fecha.getHours()).padStart(2,"0")}:${String(fecha.getMinutes()).padStart(2,"0")}:${String(fecha.getSeconds()).padStart(2,"0")}`;
+
+    document.getElementById("modalTitulo").textContent = `Operación: ${operacionSeleccionada.nombre_excel || 'Sin nombre'}`;
+    document.getElementById("modalSubtitulo").textContent = `Fecha: ${fechaStr} | Cortes: ${operacionSeleccionada.total_cortes || 0} | Usuario: ${operacionSeleccionada.usuario || '-'}`;
+
+    // Parsear resultados y renderizar tabla
+    const tbodyPlan = document.getElementById("tbodyModalPlan");
+    try {
+        const resultados = JSON.parse(operacionSeleccionada.resultados || '[]');
+        tbodyPlan.innerHTML = resultados.map(r => {
+            const codigoReal = r.codigo || r.codigo_original || '';
+            const codigoDisplay = (r.codigo_original && r.codigo && r.codigo_original !== r.codigo)
+                ? `${r.codigo_original} &rarr; ${r.codigo}`
+                : codigoReal;
+
+            let accion = (r.fuente || '').toUpperCase();
+            let badgeStyle = 'background:#9b59b6;color:white;padding:2px 8px;border-radius:3px;';
+            if (r.fuente === 'tubo_nuevo') badgeStyle = 'background:#f39c12;color:white;padding:2px 8px;border-radius:3px;';
+            else if (r.fuente === 'reemplazo') badgeStyle = 'background:#3498db;color:white;padding:2px 8px;border-radius:3px;';
+
+            let filas = `<tr>
+                <td>${r.colmena || r.nombreMaterialNuevo || '-'}</td>
+                <td>${codigoDisplay}</td>
+                <td>${r.color || '-'}</td>
+                <td>${r.medida_cm || '-'}</td>
+                <td>${r.medida_origen || '-'}</td>
+                <td>${r.sobrante_cm || '-'}</td>
+                <td><span style="${badgeStyle}">${accion}</span></td>
+            </tr>`;
+
+            if (r.sobrante_cm > 0) {
+                let accionSobrante, estilo;
+                if (r.es_intermedio) {
+                    accionSobrante = 'RESERVAR EN MESA';
+                    estilo = 'background:#fff3e0;color:#e65100;';
+                } else if (r.es_desecho) {
+                    accionSobrante = 'DESECHAR MERMA';
+                    estilo = 'background:#ffebee;color:#c62828;';
+                } else {
+                    accionSobrante = 'GUARDAR SOBRANTE';
+                    estilo = 'background:#e8f5e9;color:#2e7d32;';
+                }
+                filas += `<tr style="${estilo}">
+                    <td>${r.colmena_sobrante || '-'}</td>
+                    <td>${codigoDisplay}</td>
+                    <td></td>
+                    <td colspan="2">${r.sobrante_cm} cm</td>
+                    <td></td>
+                    <td><strong>${accionSobrante}</strong></td>
+                </tr>`;
+            }
+            return filas;
+        }).join('') || '<tr><td colspan="7">Sin datos de resultados</td></tr>';
+    } catch (e) {
+        tbodyPlan.innerHTML = '<tr><td colspan="7">Error parseando resultados</td></tr>';
+    }
+
+    document.getElementById("modalHistorial").style.display = "block";
+}
+
+function cerrarModal() {
+    document.getElementById("modalHistorial").style.display = "none";
+    operacionSeleccionada = null;
+}
+
+async function ejecutarRollback() {
+    if (!operacionSeleccionada || !usuarioSeleccionado) {
+        alert("No hay operación seleccionada o usuario activo.");
+        return;
+    }
+
+    const fecha = new Date(operacionSeleccionada.fecha);
+    const fechaStr = `${String(fecha.getDate()).padStart(2,"0")}/${String(fecha.getMonth()+1).padStart(2,"0")}/${fecha.getFullYear()} ${String(fecha.getHours()).padStart(2,"0")}:${String(fecha.getMinutes()).padStart(2,"0")}`;
+
+    const confirmar = confirm(
+        `⚠️ OPERACIÓN DESTRUCTIVA ⚠️\n\n` +
+        `Vas a REVERTIR el inventario de "${usuarioSeleccionado}" al estado previo a la operación del ${fechaStr}.\n\n` +
+        `Esto SOBREESCRIBIRÁ:\n` +
+        `• Colmenas (colmena_final)\n` +
+        `• Maestro de Seriales (maestro_seriales)\n\n` +
+        `¿Estás absolutamente seguro?`
+    );
+    if (!confirmar) return;
+
+    const btnRollback = document.getElementById("btnRollback");
+    btnRollback.disabled = true;
+    btnRollback.textContent = "Revirtiendo...";
+
+    try {
+        const db = window.fbDb;
+
+        // 1. Restaurar colmena_final
+        const snapshotColmenas = JSON.parse(operacionSeleccionada.snapshot_inventario || '[]');
+        await window.fbSetDoc(
+            window.fbDoc(db, "usuarios", usuarioSeleccionado, "colmena_final", "datos"),
+            {
+                data: JSON.stringify(snapshotColmenas),
+                fechaActualizacion: new Date().toISOString(),
+                restauradoPor: window.fbAuth.currentUser.email,
+                esRollback: true
+            }
+        );
+        console.log(`✅ colmena_final restaurada: ${snapshotColmenas.length} registros`);
+
+        // 2. Restaurar maestro_seriales (borrar todos + re-crear)
+        const snapshotSeriales = JSON.parse(operacionSeleccionada.snapshot_seriales || '[]');
+
+        // 2a. Borrar todos los documentos actuales del maestro_seriales
+        const serialesRef = window.fbCollection(db, "usuarios", usuarioSeleccionado, "maestro_seriales");
+        const serialesActuales = await window.fbGetDocs(serialesRef);
+
+        // Usar batches de 500 (límite de Firestore)
+        let batch = window.fbWriteBatch(db);
+        let batchCount = 0;
+
+        for (const docSnap of serialesActuales.docs) {
+            batch.delete(docSnap.ref);
+            batchCount++;
+            if (batchCount === 499) {
+                await batch.commit();
+                batch = window.fbWriteBatch(db);
+                batchCount = 0;
+            }
+        }
+        if (batchCount > 0) await batch.commit();
+        console.log(`🗑️ ${serialesActuales.size} seriales eliminados`);
+
+        // 2b. Re-crear seriales del snapshot
+        let batchInsert = window.fbWriteBatch(db);
+        let insertCount = 0;
+
+        for (let i = 0; i < snapshotSeriales.length; i++) {
+            const s = snapshotSeriales[i];
+            const docId = `${s.codigo}_${s.lote}_${s.paquete}_${s.serial}`.replace(/[\/\s]/g, '_');
+            const docRef = window.fbDoc(db, "usuarios", usuarioSeleccionado, "maestro_seriales", docId);
+            batchInsert.set(docRef, s);
+            insertCount++;
+            if (insertCount === 499) {
+                await batchInsert.commit();
+                batchInsert = window.fbWriteBatch(db);
+                insertCount = 0;
+            }
+        }
+        if (insertCount > 0) await batchInsert.commit();
+        console.log(`✅ ${snapshotSeriales.length} seriales restaurados`);
+
+        alert(`Rollback completado exitosamente.\n\n• ${snapshotColmenas.length} colmenas restauradas\n• ${snapshotSeriales.length} seriales restaurados`);
+        cerrarModal();
+
+    } catch (error) {
+        console.error("Error en rollback:", error);
+        alert("Error durante el rollback: " + error.message);
+    } finally {
+        btnRollback.disabled = false;
+        btnRollback.textContent = "⏪ Revertir inventario a este punto";
+    }
+}
+
 function limpiarListeners() {
     if (unsubVersion) { unsubVersion(); unsubVersion = null; }
     if (unsubColmena) { unsubColmena(); unsubColmena = null; }
     if (unsubSeriales) { unsubSeriales(); unsubSeriales = null; }
+    if (unsubHistorial) { unsubHistorial(); unsubHistorial = null; }
 }

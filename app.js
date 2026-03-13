@@ -2593,9 +2593,58 @@ function renderizarStaging(resultados) {
     document.getElementById('resultados').innerHTML = html;
 }
 
+// ── Punto de restauración: snapshot pre-optimización para rollback ──
+async function guardarPuntoRestauracion() {
+    try {
+        const user = window.firebaseAuth.currentUser;
+        if (!user) return;
+        const db = window.firebaseDb;
+
+        // Snapshot del inventario ANTES de aplicar cambios (usar las copias inmutables)
+        const snapshotColmenas = SistemaInventario.colmenaCruda.length > 0
+            ? JSON.parse(JSON.stringify(SistemaInventario.colmenaCruda))
+            : (colmenaActual ? JSON.parse(JSON.stringify(colmenaActual)) : []);
+
+        const snapshotSeriales = SistemaInventario.serialesCrudos.length > 0
+            ? JSON.parse(JSON.stringify(SistemaInventario.serialesCrudos))
+            : JSON.parse(JSON.stringify(SistemaInventario.seriales));
+
+        // Construir array de resultados para re-dibujar la vista previa
+        const resultadosGuardar = SistemaInventario.resultadosOptimizacion.map(item => {
+            const res = item.resultado;
+            const ord = item.orden || {};
+            return { ...res, ot: ord.ot || '', ubic: ord.ubic || '', componente: ord.componente || '', cod_orden: ord.cod || '' };
+        });
+
+        // Nombre del archivo Excel que se generó
+        const nombreExcel = `plan_corte_${new Date().toISOString().slice(0,10)}.xlsx`;
+
+        const registro = {
+            fecha: new Date().toISOString(),
+            nombre_excel: nombreExcel,
+            usuario: user.email,
+            resultados: JSON.stringify(resultadosGuardar),
+            snapshot_inventario: JSON.stringify(snapshotColmenas),
+            snapshot_seriales: JSON.stringify(snapshotSeriales),
+            total_cortes: resultadosGuardar.length
+        };
+
+        const colRef = window.firebaseCollection(db, "usuarios", user.email, "historial_operaciones");
+        await window.firebaseAddDoc(colRef, registro);
+
+        log('📸 Punto de restauración guardado en historial.', 'info');
+    } catch (error) {
+        console.error("Error guardando punto de restauración:", error);
+        log('⚠️ No se pudo guardar el punto de restauración: ' + error.message, 'warn');
+    }
+}
+
 // ── Confirmar: guardar en Firebase + descargar Excel ──
-function confirmarYGuardarStaging() {
+async function confirmarYGuardarStaging() {
     log('💾 Confirmado. Guardando en Firebase...', 'info');
+
+    // ── Guardar punto de restauración ANTES de persistir ──
+    await guardarPuntoRestauracion();
 
     guardarSistema();
     guardarColmenaFinalEnFirestore();
