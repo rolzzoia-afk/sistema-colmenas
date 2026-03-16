@@ -2617,36 +2617,51 @@ function renderizarStaging(resultados) {
     document.getElementById('resultados').innerHTML = html;
 }
 
-// ── Punto de restauración: snapshot pre-optimización para rollback ──
-async function guardarPuntoRestauracion() {
+// ── PASO 1: Capturar snapshot intacto ANTES de cualquier escritura ──
+// Devuelve un objeto con las colmenas y seriales tal como están en Firebase en este instante.
+// Se ejecuta ANTES de guardarSistema() y guardarColmenaFinalEnFirestore() para evitar race conditions.
+async function capturarSnapshotPreOptimizacion() {
+    const user = window.firebaseAuth.currentUser;
+    if (!user || !user.email) return null;
+
+    const db = window.firebaseDb;
+    let snapshotColmenas = [];
+    let snapshotSeriales = [];
+
+    // ── Colmenas: leer directamente del servidor (bypass de caché) ──
+    try {
+        const colmenaRef = window.firebaseDoc(db, "usuarios", user.email, "colmena_final", "datos");
+        const colmenaSnap = await window.firebaseGetDocFromServer(colmenaRef);
+        if (colmenaSnap && colmenaSnap.exists()) {
+            const colData = colmenaSnap.data();
+            if (colData && colData.data) {
+                snapshotColmenas = JSON.parse(colData.data) || [];
+            }
+        }
+        console.log(`📸 Snapshot colmenas capturado desde servidor: ${snapshotColmenas.length} registros`);
+    } catch (fbErr) {
+        console.warn("getDocFromServer falló para snapshot de colmenas, usando copias inmutables:", fbErr.message);
+        // Fallback: copias inmutables tomadas al inicio de ejecutarOptimizacion (estado pre-corte)
+        snapshotColmenas = SistemaInventario.colmenaCruda.length > 0
+            ? JSON.parse(JSON.stringify(SistemaInventario.colmenaCruda))
+            : (colmenaActual ? JSON.parse(JSON.stringify(colmenaActual)) : []);
+    }
+
+    // ── Seriales: usar la copia inmutable pre-optimización ──
+    snapshotSeriales = SistemaInventario.serialesCrudos.length > 0
+        ? JSON.parse(JSON.stringify(SistemaInventario.serialesCrudos))
+        : JSON.parse(JSON.stringify(SistemaInventario.seriales));
+
+    return { colmenas: snapshotColmenas, seriales: snapshotSeriales };
+}
+
+// ── PASO 2: Persistir el snapshot ya capturado en historial_operaciones ──
+// Recibe el snapshot pre-capturado para garantizar que NUNCA lea estado post-guardado.
+async function guardarPuntoRestauracion(snapshotIntacto) {
     try {
         const user = window.firebaseAuth.currentUser;
         if (!user) return;
         const db = window.firebaseDb;
-
-        // Snapshot del inventario ANTES de aplicar cambios: leer directamente de Firebase
-        // para garantizar que el snapshot refleje el estado REAL de la BD, no la memoria local
-        let snapshotColmenas = [];
-        try {
-            const db = window.firebaseDb;
-            const colmenaRef = window.firebaseDoc(db, "usuarios", user.email, "colmena_final", "datos");
-            const colmenaSnap = await window.firebaseGetDocFromServer(colmenaRef);
-            if (colmenaSnap && colmenaSnap.exists()) {
-                const colData = colmenaSnap.data();
-                if (colData && colData.data) {
-                    snapshotColmenas = JSON.parse(colData.data) || [];
-                }
-            }
-        } catch (fbErr) {
-            console.warn("No se pudo leer colmena_final desde servidor para snapshot, usando fallback local:", fbErr.message);
-            snapshotColmenas = SistemaInventario.colmenaCruda.length > 0
-                ? JSON.parse(JSON.stringify(SistemaInventario.colmenaCruda))
-                : (colmenaActual ? JSON.parse(JSON.stringify(colmenaActual)) : []);
-        }
-
-        const snapshotSeriales = SistemaInventario.serialesCrudos.length > 0
-            ? JSON.parse(JSON.stringify(SistemaInventario.serialesCrudos))
-            : JSON.parse(JSON.stringify(SistemaInventario.seriales));
 
         // Construir array de resultados para re-dibujar la vista previa
         const resultadosGuardar = SistemaInventario.resultadosOptimizacion.map(item => {
@@ -2655,7 +2670,6 @@ async function guardarPuntoRestauracion() {
             return { ...res, ot: ord.ot || '', ubic: ord.ubic || '', componente: ord.componente || '', cod_orden: ord.cod || '' };
         });
 
-        // Nombre del archivo Excel que se generó
         const nombreExcel = `plan_corte_${new Date().toISOString().slice(0,10)}.xlsx`;
 
         const registro = {
@@ -2663,8 +2677,8 @@ async function guardarPuntoRestauracion() {
             nombre_excel: nombreExcel,
             usuario: user.email,
             resultados: JSON.stringify(resultadosGuardar),
-            snapshot_inventario: JSON.stringify(snapshotColmenas),
-            snapshot_seriales: JSON.stringify(snapshotSeriales),
+            snapshot_inventario: JSON.stringify(snapshotIntacto.colmenas),
+            snapshot_seriales: JSON.stringify(snapshotIntacto.seriales),
             total_cortes: resultadosGuardar.length
         };
 
@@ -2686,10 +2700,17 @@ async function confirmarYGuardarStaging() {
     const btnEjecutar = document.getElementById('btnEjecutar');
     if (btnEjecutar) btnEjecutar.disabled = true;
 
-    // ── Guardar punto de restauración ANTES de persistir ──
-    await guardarPuntoRestauracion();
+    // ── PASO 1: Capturar snapshot INTACTO desde Firebase (antes de cualquier escritura) ──
+    const snapshotSeguro = await capturarSnapshotPreOptimizacion();
 
-    // ── Persistir en localStorage y Firestore (AWAIT ambas) ──
+    // ── PASO 2: Persistir el punto de restauración con el snapshot puro ──
+    if (snapshotSeguro) {
+        await guardarPuntoRestauracion(snapshotSeguro);
+    } else {
+        log('⚠️ No se pudo capturar snapshot pre-optimización. El historial puede estar incompleto.', 'warn');
+    }
+
+    // ── PASO 3: AHORA sí persistir los cambios (descontar tubos) ──
     guardarSistema();
     await guardarColmenaFinalEnFirestore();
 
