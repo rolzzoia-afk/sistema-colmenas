@@ -7,7 +7,7 @@ function limpiarNumero(valor) {
     return isNaN(num) ? 0 : num;
 }
 
-const VERSION_ACTUAL = "1.7";
+const VERSION_ACTUAL = "1.8";
 
 const MM_TUBO_ORIGINAL = 5780;
 const MM_KERF = 3;
@@ -1625,11 +1625,13 @@ function buscarReemplazos(codigo) {
 
 function buscarTubosParaOrden(codigoBuscado, medidaRequerida, codigoOriginal = null) {
     const codNormalizado = normalizarCodigo(codigoBuscado);
-    
+
     if (codigoOriginal) {
         const codOrigNormalizado = normalizarCodigo(codigoOriginal);
         for (let i = 0; i < SistemaInventario.colmenasDisponibles.length; i++) {
             const col = SistemaInventario.colmenasDisponibles[i];
+            // ── Validación de existencia real: ignorar entradas fantasma o agotadas ──
+            if (!col || !col.medida_mm || col.medida_mm <= 0) continue;
             if (normalizarCodigo(col.cod) === codOrigNormalizado && col.medida_mm >= medidaRequerida) {
                 const sobrante = col.medida_mm - medidaRequerida - MM_KERF;
                 const clasificacion = evaluarSobrante(sobrante);
@@ -1639,9 +1641,11 @@ function buscarTubosParaOrden(codigoBuscado, medidaRequerida, codigoOriginal = n
             }
         }
     }
-    
+
     for (let i = 0; i < SistemaInventario.colmenasDisponibles.length; i++) {
         const col = SistemaInventario.colmenasDisponibles[i];
+        // ── Validación de existencia real: ignorar entradas fantasma o agotadas ──
+        if (!col || !col.medida_mm || col.medida_mm <= 0) continue;
         if (normalizarCodigo(col.cod) === codNormalizado && col.medida_mm >= medidaRequerida) {
             const sobrante = col.medida_mm - medidaRequerida - MM_KERF;
             const clasificacion = evaluarSobrante(sobrante);
@@ -2074,10 +2078,23 @@ function exportarResultadosExcel(resultados) {
 }
 
 function ejecutarOptimizacion() {
-    // Determinar fuente de colmenas: archivo manual o colmena sincronizada de Firebase
-    const colmenasAUsar = usandoColmenaManual
-        ? SistemaInventario.colmenas
-        : (colmenaActual && colmenaActual.length > 0 ? colmenaActual : SistemaInventario.colmenas);
+    // ── RESETEO MANDATORIO: limpiar TODO el estado residual de optimizaciones previas ──
+    SistemaInventario.colmenasDisponibles = [];
+    SistemaInventario.colmenasHistorico = [];
+    SistemaInventario.resultadosOptimizacion = [];
+    SistemaInventario.mermas = [];
+    SistemaInventario.logs = [];
+
+    // ── Determinar fuente de colmenas: deep-copy fresca desde la fuente autoritativa ──
+    // CRÍTICO: siempre clonar para romper cualquier referencia a estados anteriores
+    let colmenasAUsar;
+    if (usandoColmenaManual) {
+        colmenasAUsar = JSON.parse(JSON.stringify(SistemaInventario.colmenas));
+    } else if (colmenaActual && colmenaActual.length > 0) {
+        colmenasAUsar = JSON.parse(JSON.stringify(colmenaActual));
+    } else {
+        colmenasAUsar = JSON.parse(JSON.stringify(SistemaInventario.colmenas));
+    }
 
     if (SistemaInventario.ordenes.length === 0 || colmenasAUsar.length === 0) { alert('Cargue órdenes y colmenas'); return; }
 
@@ -2090,11 +2107,11 @@ function ejecutarOptimizacion() {
     }
 
     log(`ℹ️ Fuente de colmenas: ${usandoColmenaManual ? 'Archivo manual' : 'Firebase (sincronizado)'}`, 'info');
+    log(`ℹ️ Colmenas cargadas para esta optimización: ${colmenasAUsar.length}`, 'info');
 
     document.getElementById('logs').innerHTML = '';
     document.getElementById('proceso').innerHTML = '';
     document.getElementById('resultados').innerHTML = '';
-    SistemaInventario.logs = [];
     SistemaInventario.colmenasDisponibles = JSON.parse(JSON.stringify(colmenasAUsar));
     SistemaInventario.colmenasHistorico = [];
     SistemaInventario.resultadosOptimizacion = [];
@@ -2607,10 +2624,25 @@ async function guardarPuntoRestauracion() {
         if (!user) return;
         const db = window.firebaseDb;
 
-        // Snapshot del inventario ANTES de aplicar cambios (usar las copias inmutables)
-        const snapshotColmenas = SistemaInventario.colmenaCruda.length > 0
-            ? JSON.parse(JSON.stringify(SistemaInventario.colmenaCruda))
-            : (colmenaActual ? JSON.parse(JSON.stringify(colmenaActual)) : []);
+        // Snapshot del inventario ANTES de aplicar cambios: leer directamente de Firebase
+        // para garantizar que el snapshot refleje el estado REAL de la BD, no la memoria local
+        let snapshotColmenas = [];
+        try {
+            const db = window.firebaseDb;
+            const colmenaRef = window.firebaseDoc(db, "usuarios", user.email, "colmena_final", "datos");
+            const colmenaSnap = await window.firebaseGetDocFromServer(colmenaRef);
+            if (colmenaSnap && colmenaSnap.exists()) {
+                const colData = colmenaSnap.data();
+                if (colData && colData.data) {
+                    snapshotColmenas = JSON.parse(colData.data) || [];
+                }
+            }
+        } catch (fbErr) {
+            console.warn("No se pudo leer colmena_final desde servidor para snapshot, usando fallback local:", fbErr.message);
+            snapshotColmenas = SistemaInventario.colmenaCruda.length > 0
+                ? JSON.parse(JSON.stringify(SistemaInventario.colmenaCruda))
+                : (colmenaActual ? JSON.parse(JSON.stringify(colmenaActual)) : []);
+        }
 
         const snapshotSeriales = SistemaInventario.serialesCrudos.length > 0
             ? JSON.parse(JSON.stringify(SistemaInventario.serialesCrudos))
@@ -2674,9 +2706,32 @@ async function confirmarYGuardarStaging() {
     SistemaInventario.colmenaCruda = [];
     SistemaInventario.overridesNuevos = {};
 
-    // ── Refresco forzado: recargar inventario desde Firebase para sincronizar memoria ──
-    // guardarColmenaFinalEnFirestore ya actualizó colmenaActual y SistemaInventario.colmenas,
-    // pero forzamos guardarSistema() de nuevo para que localStorage refleje el estado limpio.
+    // ── Limpieza de caché localStorage: forzar regeneración desde cero ──
+    localStorage.removeItem('sistemaInventario');
+
+    // ── Refresco forzado: re-leer colmena_final desde Firebase (bypass de caché) ──
+    try {
+        const user = window.firebaseAuth.currentUser;
+        if (user && user.email) {
+            const db = window.firebaseDb;
+            const colmenaRef = window.firebaseDoc(db, "usuarios", user.email, "colmena_final", "datos");
+            const freshSnap = await window.firebaseGetDocFromServer(colmenaRef);
+            if (freshSnap && freshSnap.exists()) {
+                const freshData = freshSnap.data();
+                if (freshData && freshData.data) {
+                    const colmenasFrescas = JSON.parse(freshData.data) || [];
+                    colmenaActual = colmenasFrescas;
+                    SistemaInventario.colmenas = colmenasFrescas;
+                    actualizarTablaColmenas();
+                    log(`🔄 Inventario refrescado desde Firebase: ${colmenasFrescas.length} colmenas`, 'info');
+                }
+            }
+        }
+    } catch (refreshErr) {
+        console.warn("Refresco forzado desde servidor falló, onSnapshot mantendrá la sincronía:", refreshErr.message);
+    }
+
+    // Persistir el estado limpio en localStorage
     guardarSistema();
 
     log('🔄 Memoria local sincronizada. Listo para el siguiente archivo.', 'info');
