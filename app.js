@@ -7,7 +7,7 @@ function limpiarNumero(valor) {
     return isNaN(num) ? 0 : num;
 }
 
-const VERSION_ACTUAL = "1.6";
+const VERSION_ACTUAL = "1.7";
 
 const MM_TUBO_ORIGINAL = 5780;
 const MM_KERF = 3;
@@ -2650,11 +2650,36 @@ async function guardarPuntoRestauracion() {
 async function confirmarYGuardarStaging() {
     log('💾 Confirmado. Guardando en Firebase...', 'info');
 
+    // ── Bloqueo preventivo: deshabilitar "Calcular" mientras se persiste ──
+    const btnEjecutar = document.getElementById('btnEjecutar');
+    if (btnEjecutar) btnEjecutar.disabled = true;
+
     // ── Guardar punto de restauración ANTES de persistir ──
     await guardarPuntoRestauracion();
 
+    // ── Persistir en localStorage y Firestore (AWAIT ambas) ──
     guardarSistema();
-    guardarColmenaFinalEnFirestore();
+    await guardarColmenaFinalEnFirestore();
+
+    // ── Capturar resumen ANTES de limpiar el estado temporal ──
+    const resultados = SistemaInventario.resultadosOptimizacion.map(item => item.resultado);
+
+    // ── Limpieza de estado temporal para que el siguiente Excel parta limpio ──
+    SistemaInventario.resultadosOptimizacion = [];
+    SistemaInventario.colmenasHistorico = [];
+    SistemaInventario.colmenasDisponibles = [];
+    SistemaInventario.mermas = [];
+    SistemaInventario.ordenesCrudas = [];
+    SistemaInventario.serialesCrudos = [];
+    SistemaInventario.colmenaCruda = [];
+    SistemaInventario.overridesNuevos = {};
+
+    // ── Refresco forzado: recargar inventario desde Firebase para sincronizar memoria ──
+    // guardarColmenaFinalEnFirestore ya actualizó colmenaActual y SistemaInventario.colmenas,
+    // pero forzamos guardarSistema() de nuevo para que localStorage refleje el estado limpio.
+    guardarSistema();
+
+    log('🔄 Memoria local sincronizada. Listo para el siguiente archivo.', 'info');
 
     // Habilitar botones de exportación
     document.getElementById('btnExportar').disabled = false;
@@ -2666,8 +2691,7 @@ async function confirmarYGuardarStaging() {
     // Ocultar panel de staging
     document.getElementById('panel-vista-previa').style.display = 'none';
 
-    // Mostrar resumen final
-    const resultados = SistemaInventario.resultadosOptimizacion.map(item => item.resultado);
+    // Mostrar resumen final (usa la copia capturada antes de la limpieza)
     let html = '<div class="resumen-resultado"><h3>✓ Optimización Confirmada y Guardada</h3>';
     resultados.forEach(r => {
         let badge = 'badge';
@@ -2691,6 +2715,9 @@ async function confirmarYGuardarStaging() {
     });
     html += '</div>';
     document.getElementById('resultados').innerHTML = html;
+
+    // ── Re-habilitar "Calcular" tras sincronización completa ──
+    if (btnEjecutar) btnEjecutar.disabled = false;
 
     log('✅ Inventario guardado y Excel descargado.', 'success');
 }
