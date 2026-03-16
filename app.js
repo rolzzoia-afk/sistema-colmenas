@@ -7,7 +7,7 @@ function limpiarNumero(valor) {
     return isNaN(num) ? 0 : num;
 }
 
-const VERSION_ACTUAL = "1.5";
+const VERSION_ACTUAL = "1.6";
 
 const MM_TUBO_ORIGINAL = 5780;
 const MM_KERF = 3;
@@ -2442,24 +2442,31 @@ function ejecutarOptimizacion() {
     // Recorrer resultados de atrás hacia adelante: si un sobrante fue reutilizado
     // como tubo origen en un corte posterior, es intermedio y debe eliminarse de
     // resultadosOptimizacion Y de colmenasHistorico ANTES de persistir.
-    const _tubosConsumidos = [];
+    const _tubosConsumidos = []; // Cada elemento: { llave, ri } para rastrear el consumidor
     for (let ri = SistemaInventario.resultadosOptimizacion.length - 1; ri >= 0; ri--) {
         const item = SistemaInventario.resultadosOptimizacion[ri];
         const res = item.resultado;
         if (!res) continue;
         const codigoRes = res.codigo || res.codigo_original || '';
 
-        // Registrar cada tubo origen consumido por un corte
+        // Registrar cada tubo origen consumido por un corte (con índice del consumidor)
         const origenNum = Number(res.medida_origen);
         if (!isNaN(origenNum) && origenNum > 0) {
-            _tubosConsumidos.push(`${codigoRes}|${origenNum.toFixed(1)}`);
+            _tubosConsumidos.push({ llave: `${codigoRes}|${origenNum.toFixed(1)}`, ri: ri });
         }
 
         // Si este resultado generó un sobrante (no desecho), verificar si fue consumido más abajo
         if (res.sobrante_cm > 0 && !res.es_desecho) {
             const llaveSobrante = `${codigoRes}|${Number(res.sobrante_cm).toFixed(1)}`;
-            const idxConsumo = _tubosConsumidos.indexOf(llaveSobrante);
+            const idxConsumo = _tubosConsumidos.findIndex(t => t.llave === llaveSobrante);
             if (idxConsumo !== -1) {
+                // Re-etiquetar el resultado consumidor: su tubo vino de MESA, no de la colmena original
+                const consumidorIdx = _tubosConsumidos[idxConsumo].ri;
+                const resConsumidor = SistemaInventario.resultadosOptimizacion[consumidorIdx].resultado;
+                if (resConsumidor) {
+                    resConsumidor.colmena = 'MESA';
+                }
+
                 // Sobrante intermedio: fue reutilizado → limpiar
                 _tubosConsumidos.splice(idxConsumo, 1); // balancear
 
@@ -2799,7 +2806,7 @@ function exportarResultados() {
     // Recorrer de atrás hacia adelante: si un GUARDAR SOBRANTE fue consumido
     // más abajo como Tubo Origen de un CORTAR, es intermedio y se elimina.
     // Llave simplificada: Código|Medida (sin Lote/Serial, que son '-' en sobrantes)
-    const tubosConsumidos = [];
+    const tubosConsumidos = []; // Cada elemento: { llave, filaIdx } para rastrear el consumidor
     for (let f = datosExcel.length - 1; f >= 1; f--) {
         const fila = datosExcel[f];
         const accion = String(fila[2] || '').toUpperCase();
@@ -2808,14 +2815,19 @@ function exportarResultados() {
         if (accion.includes('CORTAR')) {
             const origen = Number(fila[7]);
             if (!isNaN(origen) && origen > 0) {
-                tubosConsumidos.push(`${codigo}|${origen.toFixed(1)}`);
+                tubosConsumidos.push({ llave: `${codigo}|${origen.toFixed(1)}`, filaIdx: f });
             }
         } else if (accion.includes('GUARDAR SOBRANTE') || accion.includes('DESECHAR MERMA')) {
             const medidaSob = Number(fila[6]);
             if (!isNaN(medidaSob) && medidaSob > 0) {
                 const llaveSobrante = `${codigo}|${medidaSob.toFixed(1)}`;
-                const idxConsumo = tubosConsumidos.indexOf(llaveSobrante);
+                const idxConsumo = tubosConsumidos.findIndex(t => t.llave === llaveSobrante);
                 if (idxConsumo !== -1) {
+                    // Re-etiquetar la fila CORTAR consumidora: su tubo vino de MESA
+                    const filaConsumidor = datosExcel[tubosConsumidos[idxConsumo].filaIdx];
+                    if (filaConsumidor) {
+                        filaConsumidor[3] = 'MESA'; // Columna "Colmena" → MESA
+                    }
                     // Sobrante intermedio: fue reutilizado más abajo → eliminar
                     tubosConsumidos.splice(idxConsumo, 1);
                     datosExcel.splice(f, 1);
