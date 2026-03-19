@@ -2838,6 +2838,35 @@ async function confirmarYGuardarStaging() {
     // ── Capturar resumen ANTES de limpiar el estado temporal ──
     const resultados = SistemaInventario.resultadosOptimizacion.map(item => item.resultado);
 
+    // ── Guardar último plan en Firebase para acceso multi-dispositivo ──
+    try {
+        const user = window.firebaseAuth.currentUser;
+        if (user) {
+            const planData = {
+                resultados: JSON.stringify(SistemaInventario.resultadosOptimizacion.map(item => ({
+                    resultado: item.resultado,
+                    orden: {
+                        id: item.orden.id, ot: item.orden.ot, ubic: item.orden.ubic,
+                        cod: item.orden.cod, medida_cm: item.orden.medida_cm,
+                        componente: item.orden.componente, color: item.orden.color
+                    }
+                }))),
+                ordenes: JSON.stringify(SistemaInventario.ordenes.map(o => ({
+                    id: o.id, ot: o.ot, ubic: o.ubic, cod: o.cod,
+                    medida_cm: o.medida_cm, componente: o.componente
+                }))),
+                fecha: new Date().toISOString()
+            };
+            await window.firebaseSetDoc(
+                window.firebaseDoc(window.firebaseDb, "usuarios", user.email, "ultimo_plan", "datos"),
+                planData
+            );
+            log('☁️ Último plan guardado en la nube (accesible desde cualquier dispositivo)', 'info');
+        }
+    } catch (e) {
+        console.warn("No se pudo guardar último plan en Firebase:", e.message);
+    }
+
     // ── Exportar Excel ANTES de limpiar (usa resultadosOptimizacion que aún tiene datos) ──
     exportarResultados();
 
@@ -2975,8 +3004,45 @@ function descartarStaging() {
     log('🗑️ Vista previa descartada. Estado restaurado.', 'info');
 }
 
-function exportarResultados() {
-    if (SistemaInventario.resultadosOptimizacion.length === 0) return alert('No hay resultados');
+// ── Cargar último plan desde Firebase (para acceso multi-dispositivo) ──
+async function cargarUltimoPlanDesdeFirebase() {
+    try {
+        const user = window.firebaseAuth.currentUser;
+        if (!user) return false;
+
+        const db = window.firebaseDb;
+        const docRef = window.firebaseDoc(db, "usuarios", user.email, "ultimo_plan", "datos");
+        const snap = await window.firebaseGetDoc(docRef);
+
+        if (!snap.exists()) return false;
+
+        const data = snap.data();
+        if (!data.resultados) return false;
+
+        const items = JSON.parse(data.resultados);
+        const ordenes = data.ordenes ? JSON.parse(data.ordenes) : [];
+
+        SistemaInventario.resultadosOptimizacion = items;
+        if (ordenes.length > 0) SistemaInventario.ordenes = ordenes;
+
+        const fecha = data.fecha ? new Date(data.fecha).toLocaleString('es-CL') : 'desconocida';
+        log(`☁️ Último plan cargado desde Firebase (${fecha}) — ${items.length} cortes`, 'info');
+        return true;
+    } catch (e) {
+        console.warn("Error cargando último plan:", e.message);
+        return false;
+    }
+}
+
+async function exportarResultados() {
+    // ── Si no hay datos locales, intentar cargar último plan desde Firebase ──
+    if (SistemaInventario.resultadosOptimizacion.length === 0) {
+        const cargado = await cargarUltimoPlanDesdeFirebase();
+        if (!cargado) {
+            alert('No hay resultados para exportar. Ejecute una optimización primero, o el último plan no está disponible.');
+            return;
+        }
+    }
     // COLOR va después de Código (columna 5, índice 5)
     const datosExcel = [['OT', 'Ubicación', 'Acción', 'Colmena', 'Código', 'Color', 'Medida a Cortar (cm)', 'Tubo Origen (cm)', 'Lote', 'Paquete', 'Serial', 'Fecha Serial']];
 
@@ -3173,26 +3239,53 @@ function exportarInventarioActualizado() {
 
 function exportarColmenasDisponibles() {
     const encabezado = ['N° Colmena (Ubicación)', 'Código', 'Medida (cm)', 'Estado', 'Fecha Registro', 'Lote', 'Paquete', 'Serial'];
-    const filas = SistemaInventario.colmenasHistorico
-        .filter(c => c.estado === 'disponible')
-        .map(c => {
-            // Recuperar información del serial si existe
-            const s = c.serial || {};
-            return [
-                c.n_colmena || '-',
-                c.cod || '-',
-                c.medida_cm || 0,
-                c.estado,
-                formatearFecha(s.fecha || c.fecha || '-'),
-                s.lote || '-',
-                s.paquete || '-',
-                s.serial || '-'
-            ];
-        });
+
+    // ── Fuente de datos: colmenasHistorico si hay optimización activa,
+    //    sino colmenaActual (Firebase) como fallback robusto ──
+    let fuente = [];
+    if (SistemaInventario.colmenasHistorico.length > 0) {
+        fuente = SistemaInventario.colmenasHistorico.filter(c => c.estado === 'disponible');
+    } else if (colmenaActual && colmenaActual.length > 0) {
+        fuente = colmenaActual.map(c => ({
+            n_colmena: c.n_colmena || '-',
+            cod: c.cod || '-',
+            medida_cm: c.medida_cm || (c.medida_mm ? (c.medida_mm / 10) : 0),
+            estado: 'disponible',
+            serial: c.serial || null
+        }));
+    } else if (SistemaInventario.colmenas.length > 0) {
+        fuente = SistemaInventario.colmenas.map(c => ({
+            n_colmena: c.n_colmena || '-',
+            cod: c.cod || '-',
+            medida_cm: c.medida_cm || (c.medida_mm ? (c.medida_mm / 10) : 0),
+            estado: 'disponible',
+            serial: c.serial || null
+        }));
+    }
+
+    if (fuente.length === 0) {
+        alert("No hay colmenas disponibles para exportar. Verifique que el inventario esté sincronizado.");
+        return;
+    }
+
+    const filas = fuente.map(c => {
+        const s = c.serial || {};
+        return [
+            c.n_colmena || '-',
+            c.cod || '-',
+            c.medida_cm || 0,
+            c.estado || 'disponible',
+            formatearFecha(s.fecha || c.fecha || '-'),
+            s.lote || '-',
+            s.paquete || '-',
+            s.serial || '-'
+        ];
+    });
     const ws = XLSX.utils.aoa_to_sheet([encabezado, ...filas]);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "UBICACION_COLMENAS");
     XLSX.writeFile(wb, `colmenas_disponibles_${new Date().toISOString().slice(0,10)}.xlsx`);
+    log(`📦 Colmenas exportadas: ${filas.length} disponibles`, 'success');
 }
 
 function mostrarLogin() {
@@ -3327,4 +3420,149 @@ document.addEventListener('DOMContentLoaded', function() {
 
     const btnDescartar = document.getElementById('btnDescartarPreview');
     if (btnDescartar) btnDescartar.addEventListener('click', descartarStaging);
+
+    // ── Botón: Corregir Corte Erróneo ──
+    const btnCorregir = document.getElementById('btnCorregirCorte');
+    if (btnCorregir) btnCorregir.addEventListener('click', corregirCorteErroneo);
 });
+
+// ====== CORRECCIÓN DE CORTE ERRÓNEO (sin rollback) ======
+// Permite al operario corregir un sobrante que quedó con medida diferente
+// a la calculada, sin necesidad de revertir toda la operación.
+//
+// Flujo:
+//   1. El operario indica la colmena del sobrante y la medida real
+//   2. Se actualiza ese tubo específico en colmena_final (Firebase)
+//   3. El resto del inventario no se toca
+
+async function corregirCorteErroneo() {
+    // Verificar que hay colmenas cargadas
+    const colmenas = colmenaActual || SistemaInventario.colmenas;
+    if (!colmenas || colmenas.length === 0) {
+        alert('No hay inventario cargado. Espere a que se sincronice desde Firebase.');
+        return;
+    }
+
+    // Paso 1: Pedir la colmena a corregir
+    const listaColmenas = [...new Set(colmenas.map(c => c.n_colmena))].sort((a, b) => {
+        const na = String(a).match(/(\D*)(\d+)/);
+        const nb = String(b).match(/(\D*)(\d+)/);
+        if (na && nb) {
+            if (na[1] !== nb[1]) return na[1].localeCompare(nb[1]);
+            return parseInt(na[2]) - parseInt(nb[2]);
+        }
+        return String(a).localeCompare(String(b));
+    });
+
+    const inputColmena = prompt(
+        'CORREGIR CORTE ERRÓNEO\n\n' +
+        'Paso 1: ¿En qué colmena está el sobrante que quedó con medida incorrecta?\n\n' +
+        'Colmenas con tubos:\n' +
+        listaColmenas.slice(0, 30).join(', ') +
+        (listaColmenas.length > 30 ? '...' : '') +
+        '\n\nEscribe el nombre de la colmena (ej: A27, L03):'
+    );
+    if (!inputColmena || inputColmena.trim() === '') return;
+    const colmenaBuscada = inputColmena.trim().toUpperCase();
+
+    // Buscar tubos en esa colmena
+    const tubosEnColmena = colmenas
+        .map((c, idx) => ({ ...c, _idx: idx }))
+        .filter(c => String(c.n_colmena).toUpperCase() === colmenaBuscada);
+
+    if (tubosEnColmena.length === 0) {
+        alert(`No se encontraron tubos en la colmena "${colmenaBuscada}".`);
+        return;
+    }
+
+    // Mostrar qué hay en esa colmena
+    const detalle = tubosEnColmena.map((t, i) =>
+        `  ${i + 1}) ${t.cod} — ${t.medida_cm} cm`
+    ).join('\n');
+
+    // Paso 2: Seleccionar cuál tubo y dar la medida real
+    let seleccion = 1;
+    if (tubosEnColmena.length > 1) {
+        const inputSel = prompt(
+            `Colmena ${colmenaBuscada} tiene ${tubosEnColmena.length} tubos:\n\n${detalle}\n\n` +
+            `¿Cuál quieres corregir? (ingresa el número):`
+        );
+        if (!inputSel) return;
+        seleccion = parseInt(inputSel);
+        if (isNaN(seleccion) || seleccion < 1 || seleccion > tubosEnColmena.length) {
+            alert('Número inválido.');
+            return;
+        }
+    }
+
+    const tuboSeleccionado = tubosEnColmena[seleccion - 1];
+
+    const inputMedida = prompt(
+        `Corrigiendo: ${tuboSeleccionado.cod} en ${colmenaBuscada}\n` +
+        `Medida registrada: ${tuboSeleccionado.medida_cm} cm\n\n` +
+        `¿Cuál es la medida REAL del sobrante? (en cm):`
+    );
+    if (!inputMedida) return;
+
+    const medidaReal = limpiarNumero(inputMedida);
+    if (medidaReal <= 0) {
+        alert('Medida inválida.');
+        return;
+    }
+
+    // Confirmar
+    const confirmar = confirm(
+        `¿Confirmar corrección?\n\n` +
+        `Colmena: ${colmenaBuscada}\n` +
+        `Código: ${tuboSeleccionado.cod}\n` +
+        `Medida anterior: ${tuboSeleccionado.medida_cm} cm\n` +
+        `Medida real: ${medidaReal} cm\n\n` +
+        `Esto actualizará el inventario en Firebase.`
+    );
+    if (!confirmar) return;
+
+    // Paso 3: Aplicar la corrección
+    document.getElementById('loading-overlay').style.display = 'flex';
+
+    try {
+        const idxReal = tuboSeleccionado._idx;
+
+        // Actualizar en el array local
+        colmenas[idxReal].medida_cm = medidaReal;
+        colmenas[idxReal].medida_mm = Math.round(medidaReal * 10);
+
+        // Si la medida real es ≤ 0 o muy pequeña (merma), eliminar el tubo
+        if (medidaReal <= 1) {
+            colmenas.splice(idxReal, 1);
+            log(`🗑️ Tubo eliminado de ${colmenaBuscada} (medida real: ${medidaReal} cm — descartado como merma)`, 'info');
+        } else {
+            log(`✏️ Corregido: ${tuboSeleccionado.cod} en ${colmenaBuscada}: ${tuboSeleccionado.medida_cm} → ${medidaReal} cm`, 'success');
+        }
+
+        // Guardar en Firebase
+        colmenaActual = colmenas;
+        SistemaInventario.colmenas = colmenas;
+
+        const user = window.firebaseAuth.currentUser;
+        if (user) {
+            const datos = {
+                data: JSON.stringify(colmenas),
+                fechaActualizacion: new Date().toISOString(),
+                ultimaCorreccion: `${colmenaBuscada} ${tuboSeleccionado.cod}: ${tuboSeleccionado.medida_cm}→${medidaReal}cm`
+            };
+            await window.firebaseSetDoc(
+                window.firebaseDoc(window.firebaseDb, "usuarios", user.email, "colmena_final", "datos"),
+                datos
+            );
+        }
+
+        actualizarTablaColmenas();
+        alert(`Corrección guardada exitosamente.\n${tuboSeleccionado.cod} en ${colmenaBuscada}: ${medidaReal} cm`);
+
+    } catch (error) {
+        console.error("Error corrigiendo corte:", error);
+        alert("Error al guardar la corrección: " + error.message);
+    } finally {
+        document.getElementById('loading-overlay').style.display = 'none';
+    }
+}
