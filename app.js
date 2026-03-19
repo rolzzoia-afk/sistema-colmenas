@@ -7,7 +7,7 @@ function limpiarNumero(valor) {
     return isNaN(num) ? 0 : num;
 }
 
-const VERSION_ACTUAL = "1.8";
+const VERSION_ACTUAL = "1.9";
 
 const MM_TUBO_ORIGINAL = 5780;
 const MM_KERF = 3;
@@ -2727,6 +2727,16 @@ async function confirmarYGuardarStaging() {
     SistemaInventario.colmenaCruda = [];
     SistemaInventario.overridesNuevos = {};
 
+    // ── Limpieza visual de inputs de archivo: forzar re-selección ──
+    ['fileOrdenes', 'fileColmenas', 'fileCatalogo', 'fileEstructura'].forEach(id => {
+        const input = document.getElementById(id);
+        if (input) input.value = '';
+    });
+    ['estadoOrdenes', 'estadoColmenas', 'estadoCatalogo', 'estadoEstructura'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) { el.textContent = ''; el.className = 'estado-archivo'; }
+    });
+
     // ── Limpieza de caché localStorage: forzar regeneración desde cero ──
     localStorage.removeItem('sistemaInventario');
 
@@ -2824,6 +2834,20 @@ function descartarStaging() {
     SistemaInventario.colmenasHistorico = [];
     SistemaInventario.colmenasDisponibles = [];
     SistemaInventario.mermas = [];
+    SistemaInventario.ordenesCrudas = [];
+    SistemaInventario.serialesCrudos = [];
+    SistemaInventario.colmenaCruda = [];
+    SistemaInventario.overridesNuevos = {};
+
+    // ── Limpieza visual de inputs de archivo: forzar re-selección ──
+    ['fileOrdenes', 'fileColmenas', 'fileCatalogo', 'fileEstructura'].forEach(id => {
+        const input = document.getElementById(id);
+        if (input) input.value = '';
+    });
+    ['estadoOrdenes', 'estadoColmenas', 'estadoCatalogo', 'estadoEstructura'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) { el.textContent = ''; el.className = 'estado-archivo'; }
+    });
 
     actualizarTablaColmenas();
     actualizarTablaSeriales();
