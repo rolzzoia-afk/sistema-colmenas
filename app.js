@@ -1430,8 +1430,15 @@ async function cargarColmenas(event) {
             if (!fila) continue;
             const medida = fila[columnaMedida];
             // Usar limpiarNumero para manejar tanto comas como puntos
-            const medidaNum = limpiarNumero(medida);
+            let medidaNum = limpiarNumero(medida);
             if (medidaNum !== null && medidaNum > 0) {
+                // ── Auto-detección de unidades ──
+                // Si la medida es ≤ 10, probablemente está en metros (ej: 5.78m = 578cm)
+                // Los tubos reales nunca miden menos de 10 cm, así que es seguro convertir
+                if (medidaNum <= 10) {
+                    log(`⚠️ Medida ${medidaNum} detectada como metros → convertida a ${medidaNum * 100} cm`, 'warn');
+                    medidaNum = medidaNum * 100;
+                }
                 const cod = fila[columnaCod];
                 let nColmena;
                 if (columnaNColmena !== -1 && fila[columnaNColmena] !== null && fila[columnaNColmena] !== undefined) {
@@ -1606,10 +1613,18 @@ function agregarPaso(numero, titulo, descripcion) {
     procesoDiv.appendChild(paso);
 }
 
+// ── Umbrales configurables de sobrante (en mm) ──
+// MERMA_MAX:         ≤ este valor → se desecha como merma (no vale guardarlo)
+// ZONA_PROHIBIDA_MIN/MAX: sobrantes en esta zona son demasiado cortos para ser útiles
+//                    pero demasiado largos para desechar — el optimizador evita estos cortes.
+const MERMA_MAX_MM = 100;              // ≤ 10 cm → merma (desechar)
+const ZONA_PROHIBIDA_MIN_MM = 101;     // 10.1 cm
+const ZONA_PROHIBIDA_MAX_MM = 1299;    // 129.9 cm
+
 function evaluarSobrante(sobrante) {
     if (sobrante < 0) return { estado: 'prohibido' };
-    if (sobrante <= 100) return { estado: 'merma' };
-    if (sobrante > 100 && sobrante < 1300) return { estado: 'prohibido' };
+    if (sobrante <= MERMA_MAX_MM) return { estado: 'merma' };
+    if (sobrante >= ZONA_PROHIBIDA_MIN_MM && sobrante <= ZONA_PROHIBIDA_MAX_MM) return { estado: 'prohibido' };
     return { estado: 'colmena' };
 }
 
@@ -1626,36 +1641,58 @@ function buscarReemplazos(codigo) {
 function buscarTubosParaOrden(codigoBuscado, medidaRequerida, codigoOriginal = null) {
     const codNormalizado = normalizarCodigo(codigoBuscado);
 
+    // ── BEST FIT: buscar el tubo que genere MENOS desperdicio ──
+    // Prioridad: 1) sobrantes existentes (menor desperdicio), 2) tubos nuevos (mayor desperdicio)
+    // Esto evita gastar tubos nuevos cuando hay sobrantes aprovechables.
+
+    let mejorResultado = null;
+    let mejorSobrante = Infinity;
+
+    // Función interna para evaluar un candidato
+    function evaluarCandidato(col, indice, esReemplazo) {
+        if (!col || !col.medida_mm || col.medida_mm <= 0) return;
+        if (col.medida_mm < medidaRequerida) return;
+
+        const sobrante = col.medida_mm - medidaRequerida - MM_KERF;
+        const clasificacion = evaluarSobrante(sobrante);
+        if (clasificacion.estado === 'prohibido') return;
+
+        // Priorizar: menor sobrante = mejor ajuste (menos desperdicio)
+        if (sobrante < mejorSobrante) {
+            mejorSobrante = sobrante;
+            mejorResultado = {
+                colmena: col,
+                sobrante_mm: sobrante,
+                indice: indice,
+                clasificacion: clasificacion,
+                medidaOriginal: col.medida_mm,
+                esReemplazo: esReemplazo
+            };
+        }
+    }
+
+    // Paso 1: Buscar con código original (si se proporcionó)
     if (codigoOriginal) {
         const codOrigNormalizado = normalizarCodigo(codigoOriginal);
         for (let i = 0; i < SistemaInventario.colmenasDisponibles.length; i++) {
             const col = SistemaInventario.colmenasDisponibles[i];
-            // ── Validación de existencia real: ignorar entradas fantasma o agotadas ──
-            if (!col || !col.medida_mm || col.medida_mm <= 0) continue;
-            if (normalizarCodigo(col.cod) === codOrigNormalizado && col.medida_mm >= medidaRequerida) {
-                const sobrante = col.medida_mm - medidaRequerida - MM_KERF;
-                const clasificacion = evaluarSobrante(sobrante);
-                if (clasificacion.estado !== 'prohibido') {
-                    return { colmena: col, sobrante_mm: sobrante, indice: i, clasificacion: clasificacion, medidaOriginal: col.medida_mm, esReemplazo: false };
-                }
+            if (normalizarCodigo(col.cod) === codOrigNormalizado) {
+                evaluarCandidato(col, i, false);
             }
+        }
+        if (mejorResultado) return mejorResultado;
+    }
+
+    // Paso 2: Buscar con código normalizado (incluye reemplazos)
+    for (let i = 0; i < SistemaInventario.colmenasDisponibles.length; i++) {
+        const col = SistemaInventario.colmenasDisponibles[i];
+        if (normalizarCodigo(col.cod) === codNormalizado) {
+            const esReemp = codigoOriginal ? codNormalizado !== normalizarCodigo(codigoOriginal) : false;
+            evaluarCandidato(col, i, esReemp);
         }
     }
 
-    for (let i = 0; i < SistemaInventario.colmenasDisponibles.length; i++) {
-        const col = SistemaInventario.colmenasDisponibles[i];
-        // ── Validación de existencia real: ignorar entradas fantasma o agotadas ──
-        if (!col || !col.medida_mm || col.medida_mm <= 0) continue;
-        if (normalizarCodigo(col.cod) === codNormalizado && col.medida_mm >= medidaRequerida) {
-            const sobrante = col.medida_mm - medidaRequerida - MM_KERF;
-            const clasificacion = evaluarSobrante(sobrante);
-            if (clasificacion.estado !== 'prohibido') {
-                const esReemp = codigoOriginal ? codNormalizado !== normalizarCodigo(codigoOriginal) : false;
-                return { colmena: col, sobrante_mm: sobrante, indice: i, clasificacion: clasificacion, medidaOriginal: col.medida_mm, esReemplazo: esReemp };
-            }
-        }
-    }
-    return null;
+    return mejorResultado;
 }
 
 function buscarColmenaDisponibleConCodigo(codigo) {
@@ -2109,10 +2146,28 @@ function ejecutarOptimizacion() {
     log(`ℹ️ Fuente de colmenas: ${usandoColmenaManual ? 'Archivo manual' : 'Firebase (sincronizado)'}`, 'info');
     log(`ℹ️ Colmenas cargadas para esta optimización: ${colmenasAUsar.length}`, 'info');
 
+    // ── BEST FIT DECREASING: ordenar órdenes de mayor a menor medida ──
+    // Esto reduce el desperdicio total al asignar primero los cortes más grandes
+    // a los tubos más ajustados, dejando sobrantes útiles para cortes pequeños.
+    // Se preserva el orden original por OT/Ubicación como desempate.
+    const ordenOriginal = SistemaInventario.ordenes.map((o, i) => ({ ...o, _ordenOriginal: i }));
+    SistemaInventario.ordenes = ordenOriginal.sort((a, b) => {
+        // Primero por medida descendente (cortes grandes primero)
+        if (b.medida_mm !== a.medida_mm) return b.medida_mm - a.medida_mm;
+        // Desempate: mantener orden original (OT + Ubicación)
+        return a._ordenOriginal - b._ordenOriginal;
+    });
+    log(`📐 Órdenes reordenadas: mayor a menor (Best Fit Decreasing)`, 'info');
+
     document.getElementById('logs').innerHTML = '';
     document.getElementById('proceso').innerHTML = '';
     document.getElementById('resultados').innerHTML = '';
     SistemaInventario.colmenasDisponibles = JSON.parse(JSON.stringify(colmenasAUsar));
+
+    // ── Ordenar colmenas: sobrantes primero, tubos nuevos después ──
+    // Junto con Best Fit, esto asegura que los sobrantes existentes se
+    // evalúen primero y se prefieran sobre tubos nuevos cuando ajustan.
+    SistemaInventario.colmenasDisponibles.sort((a, b) => a.medida_mm - b.medida_mm);
     SistemaInventario.colmenasHistorico = [];
     SistemaInventario.resultadosOptimizacion = [];
     SistemaInventario.mermas = [];
@@ -2516,6 +2571,23 @@ function ejecutarOptimizacion() {
 
     actualizarTablaColmenasResultado();
     actualizarTablaMermas();
+
+    // ── Re-ordenar resultados por OT + Ubicación para el operario ──
+    // La optimización procesó de mayor a menor (Best Fit Decreasing),
+    // pero el plan de corte se muestra agrupado por kit de armado.
+    SistemaInventario.resultadosOptimizacion.sort((a, b) => {
+        const otA = String(a.orden.ot || a.orden.otAsignada || '');
+        const otB = String(b.orden.ot || b.orden.otAsignada || '');
+        if (otA !== otB) return otA.localeCompare(otB, undefined, { numeric: true });
+        return String(a.orden.ubic || '').localeCompare(String(b.orden.ubic || ''), undefined, { numeric: true });
+    });
+    // También re-ordenar las órdenes para que el staging las muestre por kit
+    SistemaInventario.ordenes.sort((a, b) => {
+        const otA = String(a.ot || a.otAsignada || '');
+        const otB = String(b.ot || b.otAsignada || '');
+        if (otA !== otB) return otA.localeCompare(otB, undefined, { numeric: true });
+        return String(a.ubic || '').localeCompare(String(b.ubic || ''), undefined, { numeric: true });
+    });
 
     log('=== CÁLCULO COMPLETADO — Revise la Vista Previa ===', 'success');
 
