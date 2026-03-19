@@ -2717,6 +2717,9 @@ async function confirmarYGuardarStaging() {
     // ── Capturar resumen ANTES de limpiar el estado temporal ──
     const resultados = SistemaInventario.resultadosOptimizacion.map(item => item.resultado);
 
+    // ── Exportar Excel ANTES de limpiar (usa resultadosOptimizacion que aún tiene datos) ──
+    exportarResultados();
+
     // ── Limpieza de estado temporal para que el siguiente Excel parta limpio ──
     SistemaInventario.resultadosOptimizacion = [];
     SistemaInventario.colmenasHistorico = [];
@@ -2770,9 +2773,6 @@ async function confirmarYGuardarStaging() {
     // Habilitar botones de exportación
     document.getElementById('btnExportar').disabled = false;
     document.getElementById('btnExportarDisponibles').disabled = false;
-
-    // Descargar Excel automáticamente
-    exportarResultados();
 
     // Ocultar panel de staging
     document.getElementById('panel-vista-previa').style.display = 'none';
