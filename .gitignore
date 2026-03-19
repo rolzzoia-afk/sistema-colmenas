@@ -1,0 +1,14 @@
+*.xlsx
+*.xlsm
+*.py
+*.spec
+__pycache__/
+*.txt
+*.png
+.continue/
+optimizer/
+TODO.md
+TODO_SERIALES.md
+optimizador_v53.html
+competencies.html
+cotizador.html
