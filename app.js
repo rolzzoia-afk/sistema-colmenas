@@ -7,7 +7,7 @@ function limpiarNumero(valor) {
     return isNaN(num) ? 0 : num;
 }
 
-const VERSION_ACTUAL = "2.2";
+const VERSION_ACTUAL = "2.0";
 
 const MM_TUBO_ORIGINAL = 5780;
 const MM_KERF = 3;
@@ -1654,8 +1654,8 @@ function log(mensaje, tipo) {
 function agregarPaso(numero, titulo, descripcion) {
     const procesoDiv = document.getElementById('proceso');
     const paso = document.createElement('div');
-    paso.style.cssText = 'background:#ecf0f1; padding:8px; margin:3px 0; border-radius:3px; border-left:3px solid #3498db; font-size:12px;';
-    paso.innerHTML = `<strong>${numero}. ${titulo}</strong> - ${descripcion}`;
+    paso.style.cssText = 'background:#0a1628; padding:8px; margin:3px 0; border-radius:3px; border-left:3px solid #3498db; font-size:12px; color:#ddd;';
+    paso.innerHTML = `<strong style="color:#00d2ff;">${numero}. ${titulo}</strong> <span style="color:#aaa;">- ${descripcion}</span>`;
     procesoDiv.appendChild(paso);
 }
 
@@ -1775,40 +1775,37 @@ function formatearResultado(orden, resultado) {
 function actualizarTablaColmenasResultado() {
     const tbody = document.getElementById('tbodyColmenasResultado');
     if (!tbody) return;
-    // El <th>Color</th> ya existe en el HTML (columna 3, posición fija)
-    // TD siempre presente; vacío si el catálogo no está cargado
     tbody.innerHTML = SistemaInventario.resultadosOptimizacion.map(item => {
         const r = item.resultado;
         const ord = SistemaInventario.ordenes.find(o => o.id === r.orden) || {};
         const color = r.color || obtenerColorDeCatalogo(r.codigo || r.codigo_original || '');
         const accion = (ord.componente && ord.componente !== 'TUBO') ? `CORTAR ${ord.componente}` : 'CORTAR';
-        let filaHtml = `<tr>
+        let filaHtml = `<tr class="fila-cortar">
             <td>${r.colmena || r.nombreMaterialNuevo || 'TUBO NUEVO'}</td>
             <td>${r.codigo || '-'}</td>
             <td>${color}</td>
-            <td>${r.medida_cm} cm</td>
-            <td>${r.medida_origen !== undefined ? r.medida_origen + ' cm' : '-'}</td>
-            <td><span class="tag-accion">${accion}</span></td>
+            <td>${Number(r.medida_cm).toFixed(1)} cm</td>
+            <td>${r.medida_origen !== undefined ? Number(r.medida_origen).toFixed(1) + ' cm' : '-'}</td>
+            <td><span class="tag-accion tag-cortar">${accion}</span></td>
         </tr>`;
-        // Mostrar fila de sobrante/intermedio/merma en la tabla HTML
         if (r.sobrante_cm > 0) {
             if (r.es_intermedio) {
-                filaHtml += `<tr style="background:#fff8e1;">
+                filaHtml += `<tr class="fila-mesa">
                     <td>-</td><td>${r.codigo || '-'}</td><td>${color}</td>
-                    <td>${r.sobrante_cm} cm</td><td>-</td>
-                    <td><span class="tag-accion" style="background:#ff9800;color:#fff;">RESERVAR EN MESA</span></td>
+                    <td>${Number(r.sobrante_cm).toFixed(1)} cm</td><td>-</td>
+                    <td><span class="tag-accion tag-mesa">RESERVAR EN MESA</span></td>
                 </tr>`;
             } else if (r.es_desecho) {
-                filaHtml += `<tr style="background:#ffebee;">
+                filaHtml += `<tr class="fila-merma">
                     <td>BASURERO</td><td>${r.codigo || '-'}</td><td>${color}</td>
-                    <td>${r.sobrante_cm} cm</td><td>-</td>
-                    <td><span class="tag-accion" style="background:#e53935;color:#fff;">DESECHAR MERMA</span></td>
+                    <td>${Number(r.sobrante_cm).toFixed(1)} cm</td><td>-</td>
+                    <td><span class="tag-accion tag-merma">DESECHAR MERMA</span></td>
                 </tr>`;
             } else {
-                filaHtml += `<tr style="background:#e8f5e9;">
+                filaHtml += `<tr class="fila-guardar">
                     <td>${r.colmena_sobrante || r.colmena || '-'}</td><td>${r.codigo || '-'}</td><td>${color}</td>
-                    <td>${r.sobrante_cm} cm</td><td>-</td>
-                    <td><span class="tag-accion" style="background:#43a047;color:#fff;">GUARDAR SOBRANTE</span></td>
+                    <td>${Number(r.sobrante_cm).toFixed(1)} cm</td><td>-</td>
+                    <td><span class="tag-accion tag-guardar">GUARDAR SOBRANTE</span></td>
                 </tr>`;
             }
         }
@@ -1853,8 +1850,8 @@ function renderizarAlertasStock(alertas) {
 
     panel.style.display = 'block';
     panel.innerHTML = `
-        <div style="background:#fff3cd; border:1px solid #ffc107; border-left:4px solid #f39c12; border-radius:6px; padding:12px 16px; margin:10px 0;">
-            <strong style="color:#856404; font-size:13px;">⚠️ ALERTA DE STOCK MÍNIMO — Materiales con ≤${STOCK_MINIMO} tubos disponibles:</strong>
+        <div style="background:#1a1a2e; border:1px solid #e67e22; border-left:4px solid #f39c12; border-radius:6px; padding:12px 16px; margin:10px 0;">
+            <strong style="color:#f39c12; font-size:13px;">ALERTA DE STOCK MÍNIMO — Materiales con ≤${STOCK_MINIMO} tubos disponibles:</strong>
             <div style="margin-top:8px; line-height:2;">${items}</div>
         </div>
     `;
