@@ -3,6 +3,16 @@
 // Solo lectura del inventario + control de versión del sistema
 // ═══════════════════════════════════════════════════════════════════
 
+// ── Lista de emails con acceso de administrador ──
+// Agregar aquí los emails autorizados para usar el panel admin.
+// Idealmente esto debería leerse de Firestore (colección "configuracion/admins"),
+// pero como respaldo mínimo se valida localmente.
+const ADMINS_AUTORIZADOS = [
+    // Agregar emails de administradores aquí, ej:
+    // "admin@empresa.com",
+    // "jefe@empresa.com"
+];
+
 let unsubVersion = null;
 let unsubColmena = null;
 let unsubSeriales = null;
@@ -19,10 +29,17 @@ document.addEventListener("DOMContentLoaded", () => {
         if (window.fbAuth) {
             clearInterval(esperar);
 
-            window.fbOnAuth(window.fbAuth, (user) => {
+            window.fbOnAuth(window.fbAuth, async (user) => {
                 if (!user) {
                     mostrarLogin();
                 } else {
+                    // ── Validación de rol admin ──
+                    const esAdmin = await verificarRolAdmin(user.email);
+                    if (!esAdmin) {
+                        alert("⛔ Acceso denegado. Tu cuenta no tiene permisos de administrador.");
+                        window.fbSignOut(window.fbAuth).then(() => location.reload());
+                        return;
+                    }
                     document.getElementById("app-container").style.display = "block";
                     document.getElementById("adminEmail").textContent = user.email;
                     inicializarPanel();
@@ -31,6 +48,32 @@ document.addEventListener("DOMContentLoaded", () => {
         }
     }, 100);
 });
+
+// Verificar si el email tiene rol de admin (primero Firestore, luego lista local)
+async function verificarRolAdmin(email) {
+    // Intento 1: verificar en Firestore (colección configuracion/admins)
+    try {
+        const docRef = window.fbDoc(window.fbDb, "configuracion", "admins");
+        const snap = await window.fbGetDoc(docRef);
+        if (snap.exists()) {
+            const data = snap.data();
+            const listaAdmins = data.emails || [];
+            if (listaAdmins.includes(email)) return true;
+            if (listaAdmins.length > 0) return false; // Lista existe pero el email no está
+        }
+    } catch (e) {
+        console.warn("No se pudo verificar admins en Firestore:", e.message);
+    }
+
+    // Intento 2: lista local hardcodeada (fallback)
+    if (ADMINS_AUTORIZADOS.length > 0) {
+        return ADMINS_AUTORIZADOS.includes(email);
+    }
+
+    // Si no hay lista configurada en ningún lado, permitir acceso (compatibilidad)
+    console.warn("⚠️ No hay lista de admins configurada. Cualquier usuario autenticado tiene acceso.");
+    return true;
+}
 
 // ─── LOGIN ──────────────────────────────────────────────────────────────────
 

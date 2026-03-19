@@ -7,7 +7,7 @@ function limpiarNumero(valor) {
     return isNaN(num) ? 0 : num;
 }
 
-const VERSION_ACTUAL = "2.1";
+const VERSION_ACTUAL = "2.0";
 
 const MM_TUBO_ORIGINAL = 5780;
 const MM_KERF = 3;
@@ -37,7 +37,6 @@ const SistemaInventario = {
 // Variables globales para manejo de colmena desde Firebase
 let colmenaActual = null;        // Colmena descargada de Firebase al inicio de sesión
 let usandoColmenaManual = false; // true si el usuario subió un archivo manualmente
-let serialesDisponibles = [];    // Seriales disponibles cargados desde Firebase
 
 // Flags de carga inicial para onSnapshot (escudo anti-inventario-vacío)
 let inventarioCargado = false;
@@ -654,48 +653,60 @@ async function guardarSerialesEnFirestore() {
             return;
         }
 
-        // Usar la instancia db global
         const db = window.firebaseDb;
-        
-        if (!db) {
-            throw new Error("Firestore no está inicializado");
-        }
+        if (!db) throw new Error("Firestore no está inicializado");
         
         log("Guardando seriales en Firestore...", "info");
         
-       // Antes: const batch = writeBatch(window.firebaseDb);
-const batch = window.firebaseWriteBatch(window.firebaseDb);
-        
-        // Ruta: usuarios/{email}/maestro_seriales
         const coleccionRef = window.firebaseCollection(db, "usuarios", user.email, "maestro_seriales");
         
-        // Primero, eliminar los documentos existentes
+        // ── FASE 1: Eliminar todos los documentos existentes (en batches de 499) ──
         const docsExistentes = await window.firebaseGetDocs(coleccionRef);
-        docsExistentes.forEach(doc => {
-            batch.delete(doc.ref);
-        });
+        let batch = window.firebaseWriteBatch(db);
+        let opCount = 0;
+
+        for (const docSnap of docsExistentes.docs) {
+            batch.delete(docSnap.ref);
+            opCount++;
+            if (opCount >= 499) {
+                await batch.commit();
+                batch = window.firebaseWriteBatch(db);
+                opCount = 0;
+            }
+        }
+        if (opCount > 0) {
+            await batch.commit();
+        }
         
-        // Luego, agregar los nuevos documentos
+        // ── FASE 2: Insertar los nuevos documentos (en batches de 499) ──
+        batch = window.firebaseWriteBatch(db);
+        opCount = 0;
+
         SistemaInventario.seriales.forEach(serial => {
-            const docId = `${serial.codigo}_${serial.lote}_${serial.paquete}_${serial.serial}`;
+            const docId = `${serial.codigo}_${serial.lote}_${serial.paquete}_${serial.serial}`.replace(/[\/\s]/g, '_');
             const docRef = window.firebaseDoc(coleccionRef, docId);
             batch.set(docRef, {
                 ...serial,
                 usuario: user.email,
                 fechaActualizacion: new Date().toISOString()
             });
+            opCount++;
+            if (opCount >= 499) {
+                // Crear promesa y resetear (no await dentro de forEach)
+                batch.commit();
+                batch = window.firebaseWriteBatch(db);
+                opCount = 0;
+            }
         });
-        
-        // Ejecutar el batch
-        await batch.commit();
+        if (opCount > 0) {
+            await batch.commit();
+        }
         
         console.log(`✅ ${SistemaInventario.seriales.length} seriales guardados en Firestore`);
         log(`✅ ${SistemaInventario.seriales.length} seriales guardados en Firestore`, "success");
         
     } catch (error) {
         console.error("Error guardando seriales en Firestore:", error);
-        
-        // Verificar errores de permisos
         if (error.code === 'permission-denied' || error.message.includes('permission')) {
             log("❌ Error de permisos: No tienes acceso a Firestore. Verifica las reglas de Firebase.", "error");
         } else {
@@ -1592,7 +1603,42 @@ function actualizarTablaCatalogo() {
 function verificarListo() {
     const tieneOrdenes = SistemaInventario.ordenes.length > 0;
     const tieneColmenas = SistemaInventario.colmenas.length > 0 || (colmenaActual && colmenaActual.length > 0);
-    document.getElementById('btnEjecutar').disabled = !(tieneOrdenes && tieneColmenas);
+    const tieneCatalogo = Object.keys(SistemaInventario.catalogoReemplazos).length > 0;
+    const tieneSeriales = SistemaInventario.seriales.length > 0;
+
+    const btnEjecutar = document.getElementById('btnEjecutar');
+    btnEjecutar.disabled = !(tieneOrdenes && tieneColmenas);
+
+    // ── Barra de progreso ──
+    const archivos = [
+        { ok: tieneOrdenes, nombre: 'Órdenes' },
+        { ok: tieneColmenas, nombre: 'Colmenas' },
+        { ok: tieneCatalogo, nombre: 'Catálogo' },
+        { ok: tieneSeriales, nombre: 'Inventario' }
+    ];
+    const cargados = archivos.filter(a => a.ok).length;
+    const faltantes = archivos.filter(a => !a.ok).map(a => a.nombre);
+    const pct = Math.round((cargados / 4) * 100);
+
+    const progressFill = document.getElementById('progressFill');
+    const progressText = document.getElementById('progressText');
+    const progressFaltantes = document.getElementById('progressFaltantes');
+
+    if (progressFill) progressFill.style.width = pct + '%';
+    if (progressText) progressText.textContent = `${cargados} de 4 archivos cargados`;
+    if (progressFaltantes) {
+        progressFaltantes.textContent = faltantes.length > 0
+            ? `Faltan: ${faltantes.join(', ')}`
+            : 'Todo listo';
+        progressFaltantes.style.color = faltantes.length === 0 ? '#27ae60' : '#aaa';
+    }
+
+    // ── Tooltip en botón deshabilitado ──
+    if (btnEjecutar.disabled && faltantes.length > 0) {
+        btnEjecutar.title = `Falta cargar: ${faltantes.join(', ')}`;
+    } else {
+        btnEjecutar.title = '';
+    }
 }
 
 function log(mensaje, tipo) {
@@ -2051,69 +2097,6 @@ async function ejecutarFlujoCompleto() {
     console.log("🚀 Flujo completo terminado", resultadoOptimizacion);
 }
 
-// Función para exportar resultados a Excel usando SheetJS (XLSX)
-function exportarResultadosExcel(resultados) {
-    if (!resultados || resultados.length === 0) {
-        const mensajeError = "❌ Error: No hay resultados para exportar";
-        console.error(mensajeError);
-        log(mensajeError, 'error');
-        alert("No hay resultados para exportar. Ejecute la optimización primero.");
-        return;
-    }
-
-    console.log("📊 Exportando resultados a Excel...", resultados);
-
-    // Crear un nuevo libro de trabajo
-    const wb = XLSX.utils.book_new();
-
-    // Convertir el array de resultados en formato para SheetJS
-    const datosParaExcel = resultados.map(r => {
-        return {
-            'Pedido': r.orden && r.orden.Pedido ? r.orden.Pedido : (r.orden && r.orden.id ? r.orden.id : 'N/A'),
-            'Colmena': r.colmena && r.colmena['N° Colmena'] ? r.colmena['N° Colmena'] : (r.colmena && r.colmena.n_colmena ? r.colmena.n_colmena : 'N/A'),
-            'Medida Orden (cm)': r.medidaOrden || 0,
-            'Medida Colmena (cm)': r.medidaColmena || 0,
-            'Merma (cm)': r.asignada ? (r.merma ? r.merma.toFixed(2) : '0.00') : 'No Asignada',
-            'Estado': r.asignada ? 'Asignada' : 'No Asignada'
-        };
-    });
-
-    // Crear la hoja con los datos
-    const ws = XLSX.utils.json_to_sheet(datosParaExcel);
-
-    // Dar formato a las columnas para que sean legibles
-    const colWidths = [
-        { wch: 20 },  // Pedido
-        { wch: 15 },  // Colmena
-        { wch: 18 },  // Medida Orden
-        { wch: 18 },  // Medida Colmena
-        { wch: 15 },  // Merma
-        { wch: 15 }   // Estado
-    ];
-    ws['!cols'] = colWidths;
-
-    // Agregar la hoja al libro
-    XLSX.utils.book_append_sheet(wb, ws, 'Plan de Optimización');
-
-    // Generar el nombre del archivo con la fecha actual
-    const fechaActual = new Date();
-    const año = fechaActual.getFullYear();
-    const mes = String(fechaActual.getMonth() + 1).padStart(2, '0');
-    const dia = String(fechaActual.getDate()).padStart(2, '0');
-    const fechaStr = `${año}${mes}${dia}`;
-    
-    const nombreArchivo = `Optimizacion_Rolzzo_${fechaStr}.xlsx`;
-
-    // Generar y descargar el archivo
-    XLSX.writeFile(wb, nombreArchivo);
-
-    // Añadir log de éxito
-    const mensajeExito = `✅ Archivo ${nombreArchivo} descargado exitosamente`;
-    console.log(mensajeExito);
-    log(mensajeExito, 'success');
-    alert(`Resultados exportados exitosamente a: ${nombreArchivo}`);
-}
-
 function ejecutarOptimizacion() {
     // ── RESETEO MANDATORIO: limpiar TODO el estado residual de optimizaciones previas ──
     SistemaInventario.colmenasDisponibles = [];
@@ -2134,6 +2117,24 @@ function ejecutarOptimizacion() {
     }
 
     if (SistemaInventario.ordenes.length === 0 || colmenasAUsar.length === 0) { alert('Cargue órdenes y colmenas'); return; }
+
+    // ── ALERTA DE OT DUPLICADA: detectar si estas órdenes ya fueron procesadas ──
+    const otsEnOrden = [...new Set(SistemaInventario.ordenes.map(o => String(o.ot || '')).filter(ot => ot && ot !== '-'))];
+    if (otsEnOrden.length > 0) {
+        // Revisar en el historial local si alguna OT ya fue confirmada hoy
+        const hoy = new Date().toISOString().split('T')[0];
+        const otsProcesadas = JSON.parse(localStorage.getItem('ots_procesadas_hoy') || '{}');
+        const duplicadas = otsEnOrden.filter(ot => otsProcesadas[ot] === hoy);
+        if (duplicadas.length > 0) {
+            const continuar = confirm(
+                `⚠️ ALERTA: Las siguientes OT ya fueron procesadas hoy:\n\n` +
+                duplicadas.map(ot => `• OT ${ot}`).join('\n') +
+                `\n\n¿Estás seguro de que quieres procesarlas de nuevo?\n` +
+                `(Si confirmas, el inventario se descontará doble)`
+            );
+            if (!continuar) return;
+        }
+    }
 
     // Guardar copias inmutables para poder recalcular sin recargar Excel
     if (SistemaInventario.ordenesCrudas.length === 0) {
@@ -2589,6 +2590,21 @@ function ejecutarOptimizacion() {
         return String(a.ubic || '').localeCompare(String(b.ubic || ''), undefined, { numeric: true });
     });
 
+    // ── RESUMEN DE AHORRO: métricas de eficiencia ──
+    const resumen = { tubosNuevos: 0, sobrantesUsados: 0, reemplazos: 0, mermaTotal: 0, materialTotal: 0 };
+    SistemaInventario.resultadosOptimizacion.forEach(item => {
+        const r = item.resultado;
+        if (!r) return;
+        resumen.materialTotal += r.medida_cm || 0;
+        if (r.fuente === 'tubo_nuevo') resumen.tubosNuevos++;
+        else if (r.fuente === 'reemplazo') resumen.reemplazos++;
+        else resumen.sobrantesUsados++;
+        if (r.es_desecho && r.sobrante_cm > 0) resumen.mermaTotal += r.sobrante_cm;
+    });
+    const totalCortes = SistemaInventario.resultadosOptimizacion.length;
+    const pctReutilizado = totalCortes > 0 ? Math.round((resumen.sobrantesUsados / totalCortes) * 100) : 0;
+    log(`📊 RESUMEN: ${totalCortes} cortes | ${resumen.tubosNuevos} tubos nuevos | ${resumen.sobrantesUsados} sobrantes reutilizados (${pctReutilizado}%) | ${resumen.reemplazos} reemplazos | Merma desechada: ${resumen.mermaTotal.toFixed(1)} cm`, 'success');
+
     log('=== CÁLCULO COMPLETADO — Revise la Vista Previa ===', 'success');
 
     // Renderizar panel de staging (vista previa)
@@ -2604,6 +2620,29 @@ function renderizarStaging(resultados) {
     const panel = document.getElementById('panel-vista-previa');
     panel.style.display = 'block';
     panel.scrollIntoView({ behavior: 'smooth' });
+
+    // ── Resumen de Ahorro visual (tarjetas) ──
+    const resumenDiv = document.getElementById('resumenAhorro');
+    if (resumenDiv) {
+        const stats = { nuevos: 0, reutilizados: 0, reemplazos: 0, merma: 0 };
+        resultados.forEach(r => {
+            if (!r) return;
+            if (r.fuente === 'tubo_nuevo') stats.nuevos++;
+            else if (r.fuente === 'reemplazo') stats.reemplazos++;
+            else stats.reutilizados++;
+            if (r.es_desecho && r.sobrante_cm > 0) stats.merma += r.sobrante_cm;
+        });
+        const total = resultados.length;
+        const pct = total > 0 ? Math.round((stats.reutilizados / total) * 100) : 0;
+        resumenDiv.innerHTML = `
+            <div class="stat-card"><div class="num">${total}</div><div class="lbl">Cortes totales</div></div>
+            <div class="stat-card"><div class="num" style="color:#f39c12">${stats.nuevos}</div><div class="lbl">Tubos nuevos</div></div>
+            <div class="stat-card"><div class="num" style="color:#27ae60">${stats.reutilizados}</div><div class="lbl">Sobrantes usados</div></div>
+            <div class="stat-card"><div class="num" style="color:#3498db">${stats.reemplazos}</div><div class="lbl">Reemplazos</div></div>
+            <div class="stat-card"><div class="num" style="color:#e74c3c">${stats.merma.toFixed(1)}</div><div class="lbl">Merma (cm)</div></div>
+            <div class="stat-card"><div class="num" style="color:${pct >= 50 ? '#27ae60' : '#e67e22'}">${pct}%</div><div class="lbl">Reutilización</div></div>
+        `;
+    }
 
     // ── Sección A: Órdenes de Entrada ──
     const tbodyOrdenes = document.getElementById('tbodyStagingOrdenes');
@@ -2622,7 +2661,7 @@ function renderizarStaging(resultados) {
     tbodyConsumo.innerHTML = consumidos.map(c => {
         let tipo = '';
         if (c.origen.includes('MERMA')) tipo = '<span style="color:#e74c3c;">MERMA</span>';
-        else tipo = '<span style="color:#2c3e50;">CORTE</span>';
+        else tipo = '<span style="color:#00d2ff;">CORTE</span>';
         return `<tr>
             <td>${c.n_colmena || '-'}</td>
             <td>${c.cod || '-'}</td>
@@ -2632,7 +2671,7 @@ function renderizarStaging(resultados) {
         </tr>`;
     }).join('') || '<tr><td colspan="5">Ningún tubo consumido</td></tr>';
 
-    // ── Sección C: Resultado del Plan ──
+    // ── Sección C: Resultado del Plan (con filas color-coded) ──
     const tbodyPlan = document.getElementById('tbodyStagingPlan');
     tbodyPlan.innerHTML = resultados.map(r => {
         const ordenOriginal = SistemaInventario.ordenes[r.orden - 1] || {};
@@ -2641,50 +2680,52 @@ function renderizarStaging(resultados) {
             ? `${r.codigo_original} → ${r.codigo}`
             : codigoReal;
         const color = obtenerColorDeCatalogo(codigoReal) || ordenOriginal.color || '';
-        let accion = r.fuente.toUpperCase();
-        let badgeStyle = '';
-        if (r.fuente === 'tubo_nuevo') badgeStyle = 'background:#f39c12;color:white;padding:2px 8px;border-radius:3px;';
-        else if (r.fuente === 'reemplazo') badgeStyle = 'background:#3498db;color:white;padding:2px 8px;border-radius:3px;';
-        else badgeStyle = 'background:#9b59b6;color:white;padding:2px 8px;border-radius:3px;';
 
-        let filas = `<tr>
+        // Acción con tag de color
+        let accionTag = '';
+        if (r.fuente === 'tubo_nuevo') accionTag = '<span class="tag-accion" style="background:#f39c12;color:#fff;">TUBO NUEVO</span>';
+        else if (r.fuente === 'reemplazo') accionTag = '<span class="tag-accion" style="background:#3498db;color:#fff;">REEMPLAZO</span>';
+        else if (r.fuente === 'merma') accionTag = '<span class="tag-accion" style="background:#e74c3c;color:#fff;">MERMA</span>';
+        else accionTag = '<span class="tag-accion" style="background:#534ab7;color:#fff;">COLMENA</span>';
+
+        let filas = `<tr class="fila-cortar">
             <td>${r.colmena || r.nombreMaterialNuevo || '-'}</td>
             <td>${codigoDisplay}</td>
             <td>${color}</td>
             <td>${formatearValor(r.medida_cm)}</td>
             <td>${formatearValor(r.medida_origen)}</td>
             <td>${formatearValor(r.sobrante_cm)}</td>
-            <td><span style="${badgeStyle}">${accion}</span></td>
+            <td>${accionTag}</td>
         </tr>`;
 
-        // Fila de sobrante si aplica
+        // Fila de sobrante si aplica (color-coded)
         if (r.sobrante_cm > 0) {
-            let accionSobrante, estilo;
+            let accionSobrante, claseRow;
             if (r.es_intermedio) {
-                accionSobrante = 'RESERVAR EN MESA';
-                estilo = 'background:#fff3e0;color:#e65100;';
+                accionSobrante = '<span class="tag-accion tag-mesa">RESERVAR EN MESA</span>';
+                claseRow = 'fila-mesa';
             } else if (r.es_desecho) {
-                accionSobrante = 'DESECHAR MERMA';
-                estilo = 'background:#ffebee;color:#c62828;';
+                accionSobrante = '<span class="tag-accion tag-merma">DESECHAR MERMA</span>';
+                claseRow = 'fila-merma';
             } else {
-                accionSobrante = 'GUARDAR SOBRANTE';
-                estilo = 'background:#e8f5e9;color:#2e7d32;';
+                accionSobrante = '<span class="tag-accion tag-guardar">GUARDAR SOBRANTE</span>';
+                claseRow = 'fila-guardar';
             }
-            filas += `<tr style="${estilo}">
+            filas += `<tr class="${claseRow}">
                 <td>${r.colmena_sobrante || '-'}</td>
                 <td>${codigoDisplay}</td>
                 <td></td>
                 <td colspan="2">${formatearValor(r.sobrante_cm)} cm</td>
                 <td></td>
-                <td><strong>${accionSobrante}</strong></td>
+                <td>${accionSobrante}</td>
             </tr>`;
         }
         return filas;
     }).join('');
 
     // ── Resumen rápido en el panel principal de resultados ──
-    let html = '<div class="resumen-resultado"><h3>🔍 Vista Previa Generada</h3>';
-    html += `<p>Se calcularon <strong>${resultados.length}</strong> cortes. Revise el panel de vista previa abajo y confirme para guardar.</p>`;
+    let html = '<div class="resumen-resultado"><h3>Vista Previa Generada</h3>';
+    html += `<p>Se calcularon <strong>${resultados.length}</strong> cortes. Revise el panel de vista previa arriba y confirme para guardar.</p>`;
     html += '</div>';
     document.getElementById('resultados').innerHTML = html;
 }
@@ -2785,6 +2826,17 @@ async function confirmarYGuardarStaging() {
     // ── PASO 3: AHORA sí persistir los cambios (descontar tubos) ──
     guardarSistema();
     await guardarColmenaFinalEnFirestore();
+
+    // ── PASO 3b: Marcar OTs como procesadas hoy (protección anti-duplicados) ──
+    const hoy = new Date().toISOString().split('T')[0];
+    const otsProcesadas = JSON.parse(localStorage.getItem('ots_procesadas_hoy') || '{}');
+    // Limpiar OTs de días anteriores
+    Object.keys(otsProcesadas).forEach(ot => { if (otsProcesadas[ot] !== hoy) delete otsProcesadas[ot]; });
+    SistemaInventario.ordenes.forEach(o => {
+        const ot = String(o.ot || '').trim();
+        if (ot && ot !== '-') otsProcesadas[ot] = hoy;
+    });
+    localStorage.setItem('ots_procesadas_hoy', JSON.stringify(otsProcesadas));
 
     // ── Capturar resumen ANTES de limpiar el estado temporal ──
     const resultados = SistemaInventario.resultadosOptimizacion.map(item => item.resultado);
