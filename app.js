@@ -7,7 +7,7 @@ function limpiarNumero(valor) {
     return isNaN(num) ? 0 : num;
 }
 
-const VERSION_ACTUAL = "2.5";
+const VERSION_ACTUAL = "2.6";
 
 const MM_TUBO_ORIGINAL = 5780;
 const MM_KERF = 3;
@@ -258,23 +258,6 @@ function cargarDesdeFirestore() {
 
     // Cargar colmena_final y registrar listener real-time
     cargarColmenaFinalDesdeFirestore();
-
-    // ── Listener de señal de cache_reset (enviada por admin tras rollback) ──
-    const cacheResetRef = window.firebaseDoc(db, "usuarios", user.email, "control", "cache_reset");
-    window.firebaseOnSnapshot(cacheResetRef, { includeMetadataChanges: false }, (snap) => {
-        if (!snap.exists() || snap.metadata.hasPendingWrites) return;
-        const data = snap.data();
-        if (data && data.limpiarOts) {
-            // Limpiar caché local de OTs procesadas para habilitar reprocesamiento post-rollback
-            localStorage.removeItem('ots_procesadas_hoy');
-            localStorage.removeItem('sistemaInventario');
-            console.log("🧹 Caché local limpiada por señal de rollback del administrador");
-            log("🔄 El administrador revirtió una operación. La página se recargará en 3 segundos...", "warn");
-            setTimeout(() => { location.reload(); }, 3000);
-        }
-    }, (error) => {
-        console.warn("Error en listener cache_reset:", error.message);
-    });
 }
 
 // Función para guardar resultados de optimización en Firestore
@@ -489,6 +472,22 @@ function cargarSistema() {
 
 // Cargar automáticamente al inicio
 cargarSistema();
+
+// ── Limpiar colmenas del localStorage al arrancar ──
+// Las colmenas SIEMPRE vienen de Firebase (colmena_final via onSnapshot).
+// Si hay datos de colmenas en localStorage pueden ser stale post-rollback
+// y contaminar la optimización antes de que Firebase responda.
+if (localStorage.getItem('sistemaInventario')) {
+    try {
+        const cached = JSON.parse(localStorage.getItem('sistemaInventario'));
+        // Borrar colmenas del caché para forzar que vengan de Firebase
+        if (cached && cached.colmenas) {
+            cached.colmenas = [];
+            cached.colmenaCruda = [];
+            localStorage.setItem('sistemaInventario', JSON.stringify(cached));
+        }
+    } catch(e) { /* ignorar error de parse */ }
+}
 
 // ─── FUNCIONES DE SERIALES (Estructura de Inventario) ───────────────────────────
 
@@ -2122,12 +2121,19 @@ function ejecutarOptimizacion() {
     // ── Determinar fuente de colmenas: deep-copy fresca desde la fuente autoritativa ──
     // CRÍTICO: siempre clonar para romper cualquier referencia a estados anteriores
     let colmenasAUsar;
-    if (usandoColmenaManual) {
-        colmenasAUsar = JSON.parse(JSON.stringify(SistemaInventario.colmenas));
-    } else if (colmenaActual && colmenaActual.length > 0) {
+    if (colmenaActual && colmenaActual.length > 0) {
+        // Firebase es la fuente definitiva — garantiza que rollback se aplique correctamente
         colmenasAUsar = JSON.parse(JSON.stringify(colmenaActual));
-    } else {
+        if (usandoColmenaManual) {
+            log('ℹ️ Excel manual ignorado — usando Firebase (puede haber rollback activo)', 'info');
+            usandoColmenaManual = false;
+        }
+    } else if (usandoColmenaManual && SistemaInventario.colmenas.length > 0) {
+        // Solo usar Excel manual si Firebase no tiene nada (primera carga)
         colmenasAUsar = JSON.parse(JSON.stringify(SistemaInventario.colmenas));
+    } else {
+        alert('No hay colmenas. Espere la sincronización con Firebase o cargue un archivo.');
+        return;
     }
 
     if (SistemaInventario.ordenes.length === 0 || colmenasAUsar.length === 0) { alert('Cargue órdenes y colmenas'); return; }
@@ -2755,10 +2761,7 @@ async function capturarSnapshotPreOptimizacion() {
     let snapshotColmenas = [];
     let snapshotSeriales = [];
 
-    // ── Colmenas: SIEMPRE leer desde el servidor (la fuente de verdad real) ──
-    // CRÍTICO: NO usar colmenaCruda como fallback porque puede contener
-    // estado post-corte de una optimización anterior en la misma sesión.
-    // Si getDocFromServer falla, usar colmenaActual (última sincronización Firebase).
+    // ── Colmenas: leer directamente del servidor (bypass de caché) ──
     try {
         const colmenaRef = window.firebaseDoc(db, "usuarios", user.email, "colmena_final", "datos");
         const colmenaSnap = await window.firebaseGetDocFromServer(colmenaRef);
@@ -2770,16 +2773,14 @@ async function capturarSnapshotPreOptimizacion() {
         }
         console.log(`📸 Snapshot colmenas capturado desde servidor: ${snapshotColmenas.length} registros`);
     } catch (fbErr) {
-        console.warn("getDocFromServer falló para snapshot de colmenas, usando colmenaActual:", fbErr.message);
-        // Fallback SEGURO: colmenaActual viene de onSnapshot y refleja el último estado
-        // confirmado en Firebase, nunca el estado calculado localmente.
-        snapshotColmenas = colmenaActual ? JSON.parse(JSON.stringify(colmenaActual)) : [];
-        console.log(`📸 Snapshot colmenas (fallback onSnapshot): ${snapshotColmenas.length} registros`);
+        console.warn("getDocFromServer falló para snapshot de colmenas, usando copias inmutables:", fbErr.message);
+        // Fallback: copias inmutables tomadas al inicio de ejecutarOptimizacion (estado pre-corte)
+        snapshotColmenas = SistemaInventario.colmenaCruda.length > 0
+            ? JSON.parse(JSON.stringify(SistemaInventario.colmenaCruda))
+            : (colmenaActual ? JSON.parse(JSON.stringify(colmenaActual)) : []);
     }
 
-    // ── Seriales: usar la copia inmutable tomada AL INICIO de ejecutarOptimizacion ──
-    // serialesCrudos se toma ANTES de marcar ningún serial como ocupado,
-    // por lo que siempre refleja el estado pre-corte real.
+    // ── Seriales: usar la copia inmutable pre-optimización ──
     snapshotSeriales = SistemaInventario.serialesCrudos.length > 0
         ? JSON.parse(JSON.stringify(SistemaInventario.serialesCrudos))
         : JSON.parse(JSON.stringify(SistemaInventario.seriales));
@@ -2847,8 +2848,6 @@ async function confirmarYGuardarStaging() {
     await guardarColmenaFinalEnFirestore();
 
     // ── PASO 3b: Marcar OTs como procesadas hoy (protección anti-duplicados) ──
-    // NOTA: Este registro se limpia automáticamente si el admin hace rollback
-    // desde el panel Ojo de Dios, para permitir reprocesar sin bloqueo.
     const hoy = new Date().toISOString().split('T')[0];
     const otsProcesadas = JSON.parse(localStorage.getItem('ots_procesadas_hoy') || '{}');
     // Limpiar OTs de días anteriores
@@ -3012,9 +3011,6 @@ function descartarStaging() {
     SistemaInventario.serialesCrudos = [];
     SistemaInventario.colmenaCruda = [];
     SistemaInventario.overridesNuevos = {};
-
-    // ── Limpiar OTs procesadas hoy para que un post-rollback no quede bloqueado ──
-    localStorage.removeItem('ots_procesadas_hoy');
 
     // ── Limpieza visual de inputs de archivo: forzar re-selección ──
     ['fileOrdenes', 'fileColmenas', 'fileCatalogo', 'fileEstructura'].forEach(id => {
