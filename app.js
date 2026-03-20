@@ -7,7 +7,7 @@ function limpiarNumero(valor) {
     return isNaN(num) ? 0 : num;
 }
 
-const VERSION_ACTUAL = "3.3";
+const VERSION_ACTUAL = "3.4";
 
 const MM_TUBO_ORIGINAL = 5780;
 const MM_KERF = 3;
