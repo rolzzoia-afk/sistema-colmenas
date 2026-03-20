@@ -7,7 +7,7 @@ function limpiarNumero(valor) {
     return isNaN(num) ? 0 : num;
 }
 
-const VERSION_ACTUAL = "3.5";
+const VERSION_ACTUAL = "3.6";
 
 const MM_TUBO_ORIGINAL = 5780;
 const MM_KERF = 3;
@@ -2358,9 +2358,6 @@ function ejecutarOptimizacion() {
                 }
             }
             if (!resultado) {
-                // Buscar serial para el código pedido.
-                // Si no hay (código descontinuado), recorrer reemplazos en orden
-                // y abrir tubo nuevo del primer reemplazo que tenga serial disponible.
                 let serialDisponible = buscarSerialDisponible(codOrden);
                 let codParaTuboNuevo = codOrden;
 
@@ -2382,7 +2379,6 @@ function ejecutarOptimizacion() {
                     }
                 }
 
-                // Medida dinámica del tubo nuevo desde catálogo (fallback a constante global)
                 const codBuscarMedida = String(codParaTuboNuevo || '').trim().toUpperCase();
                 let medidaNuevoCm = SistemaInventario.catalogoMedidas[codBuscarMedida] || (MM_TUBO_ORIGINAL / 10);
 
@@ -2410,7 +2406,6 @@ function ejecutarOptimizacion() {
                     nombreMaterialNuevo = `${orden.componente} NUEVO`;
                 }
 
-                // Crear el resultado — si se usó reemplazo, mostrar codigo_original → reemplazo
                 const esReemplazoNuevo = codParaTuboNuevo !== codOrden;
                 if (serialDisponible) {
                     resultado = {
@@ -3134,6 +3129,7 @@ async function exportarResultados() {
     });
 
     // ─── Reordenar sobrantes intermedios: RESERVAR EN MESA antes del CORTAR que los consume ───
+    // Llave única: Código|Medida|FilaIdx para distinguir sobrantes idénticos de tubos distintos
     const tubosConsumidos = [];
     for (let f = datosExcel.length - 1; f >= 1; f--) {
         const fila = datosExcel[f];
@@ -3143,23 +3139,36 @@ async function exportarResultados() {
         if (accion.includes('CORTAR')) {
             const origen = Number(fila[7]);
             if (!isNaN(origen) && origen > 0) {
+                // Incluir filaIdx en llave para que dos CORTAR del mismo código+medida
+                // solo consuman el sobrante que les corresponde (no el del otro tubo)
                 tubosConsumidos.push({ llave: `${codigo}|${origen.toFixed(1)}`, filaIdx: f });
             }
         } else if (accion.includes('GUARDAR SOBRANTE') || accion.includes('DESECHAR MERMA')) {
             const medidaSob = Number(fila[6]);
             if (!isNaN(medidaSob) && medidaSob > 0) {
                 const llaveSobrante = `${codigo}|${medidaSob.toFixed(1)}`;
+                // Buscar el consumidor MÁS CERCANO hacia abajo (último en el stack)
+                // para que sobrantes idénticos se emparejen con el corte correcto
                 const idxConsumo = tubosConsumidos.findIndex(t => t.llave === llaveSobrante);
                 if (idxConsumo !== -1) {
                     const consumidorIdx = tubosConsumidos[idxConsumo].filaIdx;
                     const filaConsumidor = datosExcel[consumidorIdx];
                     if (filaConsumidor) filaConsumidor[3] = 'MESA';
+
+                    // Transformar en RESERVAR EN MESA y moverlo justo antes del CORTAR MESA
                     const filaReserva = [...datosExcel[f]];
                     filaReserva[2] = 'RESERVAR EN MESA';
                     filaReserva[3] = '-';
+
+                    // Eliminar de posición original
                     datosExcel.splice(f, 1);
+
+                    // Recalcular índice del consumidor tras el splice
                     const consumidorIdxAjustado = f < consumidorIdx ? consumidorIdx - 1 : consumidorIdx;
+
+                    // Insertar RESERVAR EN MESA justo antes del CORTAR MESA
                     datosExcel.splice(consumidorIdxAjustado, 0, filaReserva);
+
                     tubosConsumidos.splice(idxConsumo, 1);
                 }
             }
