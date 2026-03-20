@@ -7,7 +7,7 @@ function limpiarNumero(valor) {
     return isNaN(num) ? 0 : num;
 }
 
-const VERSION_ACTUAL = "3.4";
+const VERSION_ACTUAL = "3.5";
 
 const MM_TUBO_ORIGINAL = 5780;
 const MM_KERF = 3;
@@ -2358,11 +2358,32 @@ function ejecutarOptimizacion() {
                 }
             }
             if (!resultado) {
-                // Buscar un serial disponible para este código
-                const serialDisponible = buscarSerialDisponible(codOrden);
+                // Buscar serial para el código pedido.
+                // Si no hay (código descontinuado), recorrer reemplazos en orden
+                // y abrir tubo nuevo del primer reemplazo que tenga serial disponible.
+                let serialDisponible = buscarSerialDisponible(codOrden);
+                let codParaTuboNuevo = codOrden;
+
+                if (!serialDisponible) {
+                    const reemplazosParaNuevo = buscarReemplazos(codOrden);
+                    if (reemplazosParaNuevo && reemplazosParaNuevo.length > 0) {
+                        for (const codReemp of reemplazosParaNuevo) {
+                            const serialReemp = buscarSerialDisponible(codReemp);
+                            if (serialReemp) {
+                                serialDisponible = serialReemp;
+                                codParaTuboNuevo = codReemp;
+                                log(`🔄 Serial no disponible para ${codOrden} — abriendo tubo nuevo de reemplazo ${codReemp}`, 'info');
+                                break;
+                            }
+                        }
+                    }
+                    if (!serialDisponible) {
+                        log(`⚠️ No hay serial disponible para ${codOrden} ni para ninguno de sus reemplazos`, 'warn');
+                    }
+                }
 
                 // Medida dinámica del tubo nuevo desde catálogo (fallback a constante global)
-                const codBuscarMedida = String(codOrden || '').trim().toUpperCase();
+                const codBuscarMedida = String(codParaTuboNuevo || '').trim().toUpperCase();
                 let medidaNuevoCm = SistemaInventario.catalogoMedidas[codBuscarMedida] || (MM_TUBO_ORIGINAL / 10);
 
                 // Rectificación al vuelo: si hay un override de medida real, usarlo
@@ -2389,24 +2410,23 @@ function ejecutarOptimizacion() {
                     nombreMaterialNuevo = `${orden.componente} NUEVO`;
                 }
 
-                // Crear el resultado con información del serial y colmena asignada
+                // Crear el resultado — si se usó reemplazo, mostrar codigo_original → reemplazo
+                const esReemplazoNuevo = codParaTuboNuevo !== codOrden;
                 if (serialDisponible) {
                     resultado = {
                         orden: orden.id,
                         medida_cm: orden.medida_cm,
-                        fuente: 'tubo_nuevo',
+                        fuente: esReemplazoNuevo ? 'reemplazo' : 'tubo_nuevo',
                         colmena: posicionNueva,
-                        codigo: codOrden,
+                        codigo: codParaTuboNuevo,
                         codigo_original: codOrden,
+                        codigo_reemplazo: esReemplazoNuevo ? codParaTuboNuevo : undefined,
                         sobrante_cm: sobranteNuevo / 10,
                         medida_origen: medidaNuevoCm,
                         serial: serialDisponible,
                         nombreMaterialNuevo: nombreMaterialNuevo
                     };
-
-                    // Marcar el serial como ocupado en la lista local
                     marcarSerialComoOcupado(serialDisponible, orden.id);
-
                     log(`🏷️ Serial asignado: ${serialDisponible.codigo} - Lote: ${serialDisponible.lote} - Paquete: ${serialDisponible.paquete} - Serial: ${serialDisponible.serial}`, 'info');
                 } else {
                     resultado = {
@@ -2414,17 +2434,15 @@ function ejecutarOptimizacion() {
                         medida_cm: orden.medida_cm,
                         fuente: 'tubo_nuevo',
                         colmena: posicionNueva,
-                        codigo: codOrden,
+                        codigo: codParaTuboNuevo,
                         codigo_original: codOrden,
                         sobrante_cm: sobranteNuevo / 10,
                         medida_origen: medidaNuevoCm,
                         nombreMaterialNuevo: nombreMaterialNuevo
                     };
-
-                    log(`⚠️ No se encontró serial disponible para el código ${codOrden}`, 'warn');
                 }
                 
-                const codigoTuboNuevo = codOrden || 'TUBO-NUEVO';
+                const codigoTuboNuevo = codParaTuboNuevo || 'TUBO-NUEVO';
                 
                 // Añadir información del serial al histórico si está disponible
                 const infoSerial = serialDisponible ? 
@@ -3115,10 +3133,7 @@ async function exportarResultados() {
         }
     });
 
-    // ─── Reordenar sobrantes intermedios (RESERVAR EN MESA antes del CORTAR que los usa) ───
-    // Recorrer de atrás hacia adelante: si un sobrante fue reutilizado como tubo de MESA,
-    // moverlo justo ANTES del CORTAR MESA que lo consume, para que el operario lea en orden.
-    // Llave: Código|Medida
+    // ─── Reordenar sobrantes intermedios: RESERVAR EN MESA antes del CORTAR que los consume ───
     const tubosConsumidos = [];
     for (let f = datosExcel.length - 1; f >= 1; f--) {
         const fila = datosExcel[f];
@@ -3138,25 +3153,13 @@ async function exportarResultados() {
                 if (idxConsumo !== -1) {
                     const consumidorIdx = tubosConsumidos[idxConsumo].filaIdx;
                     const filaConsumidor = datosExcel[consumidorIdx];
-
-                    // Re-etiquetar el CORTAR consumidor: su tubo viene de MESA
                     if (filaConsumidor) filaConsumidor[3] = 'MESA';
-
-                    // Transformar GUARDAR SOBRANTE → RESERVAR EN MESA
                     const filaReserva = [...datosExcel[f]];
                     filaReserva[2] = 'RESERVAR EN MESA';
                     filaReserva[3] = '-';
-
-                    // Eliminar la fila sobrante en su posición original
                     datosExcel.splice(f, 1);
-
-                    // Recalcular índice del consumidor tras el splice
-                    // (si el sobrante estaba antes del consumidor, el índice baja en 1)
                     const consumidorIdxAjustado = f < consumidorIdx ? consumidorIdx - 1 : consumidorIdx;
-
-                    // Insertar RESERVAR EN MESA justo antes del CORTAR MESA que lo consume
                     datosExcel.splice(consumidorIdxAjustado, 0, filaReserva);
-
                     tubosConsumidos.splice(idxConsumo, 1);
                 }
             }
