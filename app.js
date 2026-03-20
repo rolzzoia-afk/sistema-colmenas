@@ -7,7 +7,7 @@ function limpiarNumero(valor) {
     return isNaN(num) ? 0 : num;
 }
 
-const VERSION_ACTUAL = "2.7";
+const VERSION_ACTUAL = "2.8";
 
 const MM_TUBO_ORIGINAL = 5780;
 const MM_KERF = 3;
@@ -399,7 +399,7 @@ async function guardarColmenaFinalEnFirestore() {
         // Extraer colmenas disponibles del histórico y mapear al formato simple
         // IMPORTANTE: incluir serial para preservar la trazabilidad en optimizaciones sucesivas
         const colmenasFinal = SistemaInventario.colmenasHistorico
-            .filter(c => c.estado === 'disponible')
+            .filter(c => c.estado === 'disponible' && c.medida_mm > 0 && c.cod)
             .map(c => ({
                 n_colmena: c.n_colmena,
                 medida_mm: c.medida_mm,
@@ -2222,8 +2222,8 @@ function ejecutarOptimizacion() {
                 // CORRECCIÓN: eliminar el tubo de colmenasDisponibles (el slot queda vacío)
                 SistemaInventario.colmenasDisponibles.splice(tuboEncontrado.indice, 1);
                 if (idxHistorico !== -1) {
-                    // La colmena física queda VACÍA y DISPONIBLE: medida 0, código ''
-                    SistemaInventario.colmenasHistorico[idxHistorico].estado = 'disponible';
+                    // Colmena VACÍA tras merma — marcar como 'usada' para que NO vuelva al inventario
+                    SistemaInventario.colmenasHistorico[idxHistorico].estado = 'usada';
                     SistemaInventario.colmenasHistorico[idxHistorico].medida_mm = 0;
                     SistemaInventario.colmenasHistorico[idxHistorico].medida_cm = 0;
                     SistemaInventario.colmenasHistorico[idxHistorico].cod = '';
@@ -2308,8 +2308,8 @@ function ejecutarOptimizacion() {
                             // CORRECCIÓN: eliminar el tubo de colmenasDisponibles (el slot queda vacío)
                             SistemaInventario.colmenasDisponibles.splice(tuboReemplazo.indice, 1);
                             if (idxHistorico !== -1) {
-                                // La colmena física queda VACÍA y DISPONIBLE: medida 0, código ''
-                                SistemaInventario.colmenasHistorico[idxHistorico].estado = 'disponible';
+                                // Colmena VACÍA tras merma — marcar como 'usada' para que NO vuelva al inventario
+                                SistemaInventario.colmenasHistorico[idxHistorico].estado = 'usada';
                                 SistemaInventario.colmenasHistorico[idxHistorico].medida_mm = 0;
                                 SistemaInventario.colmenasHistorico[idxHistorico].medida_cm = 0;
                                 SistemaInventario.colmenasHistorico[idxHistorico].cod = '';
@@ -2731,24 +2731,36 @@ function renderizarStaging(resultados) {
 // Devuelve un objeto con las colmenas y seriales tal como están en Firebase en este instante.
 // Se ejecuta ANTES de guardarSistema() y guardarColmenaFinalEnFirestore() para evitar race conditions.
 async function capturarSnapshotPreOptimizacion() {
-    // DIAGNÓSTICO: mostrar exactamente qué tiene colmenaActual en este instante
-    console.warn("📸 CAPTURANDO SNAPSHOT — colmenaActual tiene:", colmenaActual ? colmenaActual.length : "NULL/vacío", "colmenas");
-    if (colmenaActual && colmenaActual.length > 0) {
-        console.warn("📸 Primeras 3 colmenas de colmenaActual:", JSON.stringify(colmenaActual.slice(0,3)));
+    const user = window.firebaseAuth.currentUser;
+    if (!user || !user.email) return null;
+
+    const db = window.firebaseDb;
+    let snapshotColmenas = [];
+    let snapshotSeriales = [];
+
+    // ── Colmenas: leer directamente del servidor (bypass de caché) ──
+    try {
+        const colmenaRef = window.firebaseDoc(db, "usuarios", user.email, "colmena_final", "datos");
+        const colmenaSnap = await window.firebaseGetDocFromServer(colmenaRef);
+        if (colmenaSnap && colmenaSnap.exists()) {
+            const colData = colmenaSnap.data();
+            if (colData && colData.data) {
+                snapshotColmenas = JSON.parse(colData.data) || [];
+            }
+        }
+        console.log(`📸 Snapshot colmenas capturado desde servidor: ${snapshotColmenas.length} registros`);
+    } catch (fbErr) {
+        console.warn("getDocFromServer falló para snapshot de colmenas, usando copias inmutables:", fbErr.message);
+        // Fallback: copias inmutables tomadas al inicio de ejecutarOptimizacion (estado pre-corte)
+        snapshotColmenas = SistemaInventario.colmenaCruda.length > 0
+            ? JSON.parse(JSON.stringify(SistemaInventario.colmenaCruda))
+            : (colmenaActual ? JSON.parse(JSON.stringify(colmenaActual)) : []);
     }
 
-    // Fuente única: colmenaActual (onSnapshot de Firebase, siempre pre-corte en este punto)
-    const snapshotColmenas = colmenaActual
-        ? JSON.parse(JSON.stringify(colmenaActual))
-        : [];
-
-    const snapshotSeriales = SistemaInventario.serialesCrudos.length > 0
+    // ── Seriales: usar la copia inmutable pre-optimización ──
+    snapshotSeriales = SistemaInventario.serialesCrudos.length > 0
         ? JSON.parse(JSON.stringify(SistemaInventario.serialesCrudos))
         : JSON.parse(JSON.stringify(SistemaInventario.seriales));
-
-    const disponibles = snapshotSeriales.filter(s => s.estado === 'disponible').length;
-    console.warn("📸 SNAPSHOT FINAL:", snapshotColmenas.length, "colmenas,", disponibles, "seriales disponibles");
-    log(`📸 DIAGNÓSTICO SNAPSHOT: ${snapshotColmenas.length} colmenas, ${disponibles} tubos disponibles`, 'info');
 
     return { colmenas: snapshotColmenas, seriales: snapshotSeriales };
 }
@@ -2782,13 +2794,6 @@ async function guardarPuntoRestauracion(snapshotIntacto) {
 
         const colRef = window.firebaseCollection(db, "usuarios", user.email, "historial_operaciones");
         await window.firebaseAddDoc(colRef, registro);
-
-        // ── DIAGNÓSTICO: mostrar qué se guardó en el snapshot ──
-        const _snapCols = snapshotIntacto.colmenas.length;
-        const _snapSers = snapshotIntacto.seriales.filter(s => s.estado === 'disponible').length;
-        console.warn(`📸 SNAPSHOT GUARDADO: ${_snapCols} colmenas, ${_snapSers} seriales disponibles`);
-        console.table(snapshotIntacto.colmenas.slice(0, 10)); // primeras 10 colmenas del snapshot
-        log(`📸 SNAPSHOT: ${_snapCols} colmenas guardadas en historial (${_snapSers} tubos disponibles)`, 'success');
 
         log('📸 Punto de restauración guardado en historial.', 'info');
     } catch (error) {
