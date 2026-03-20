@@ -7,7 +7,7 @@ function limpiarNumero(valor) {
     return isNaN(num) ? 0 : num;
 }
 
-const VERSION_ACTUAL = "4.0";
+const VERSION_ACTUAL = "4.1";
 
 const MM_TUBO_ORIGINAL = 5780;
 const MM_KERF = 3;
@@ -2516,38 +2516,33 @@ function ejecutarOptimizacion() {
     });
 
     // ─── Limpieza de sobrantes intermedios en memoria (anti inventario fantasma) ───
-    // Recorrer resultados de atrás hacia adelante: si un sobrante fue reutilizado
-    // como tubo origen en un corte posterior, es intermedio y debe eliminarse de
-    // resultadosOptimizacion Y de colmenasHistorico ANTES de persistir.
-    const _tubosConsumidos = []; // Cada elemento: { llave, ri } para rastrear el consumidor
+    // Recorrer de atrás hacia adelante. Llave incluye ri para distinguir sobrantes
+    // idénticos de tubos distintos (ej: dos E66 con sobrante 289.5cm).
+    const _tubosConsumidos = [];
     for (let ri = SistemaInventario.resultadosOptimizacion.length - 1; ri >= 0; ri--) {
         const item = SistemaInventario.resultadosOptimizacion[ri];
         const res = item.resultado;
         if (!res) continue;
         const codigoRes = res.codigo || res.codigo_original || '';
 
-        // Registrar cada tubo origen consumido por un corte (con índice del consumidor)
+        // Registrar tubo origen consumido — llave única por posición (ri)
         const origenNum = Number(res.medida_origen);
         if (!isNaN(origenNum) && origenNum > 0) {
             _tubosConsumidos.push({ llave: `${codigoRes}|${origenNum.toFixed(1)}`, ri: ri });
         }
 
-        // Si este resultado generó un sobrante (no desecho), verificar si fue consumido más abajo
+        // Verificar si este sobrante fue consumido más abajo
         if (res.sobrante_cm > 0 && !res.es_desecho) {
             const llaveSobrante = `${codigoRes}|${Number(res.sobrante_cm).toFixed(1)}`;
+            // Buscar CUALQUIER consumidor con esa llave (puede haber múltiples iguales)
             const idxConsumo = _tubosConsumidos.findIndex(t => t.llave === llaveSobrante);
             if (idxConsumo !== -1) {
-                // Re-etiquetar el resultado consumidor: su tubo vino de MESA, no de la colmena original
                 const consumidorIdx = _tubosConsumidos[idxConsumo].ri;
                 const resConsumidor = SistemaInventario.resultadosOptimizacion[consumidorIdx].resultado;
-                if (resConsumidor) {
-                    resConsumidor.colmena = 'MESA';
-                }
+                if (resConsumidor) resConsumidor.colmena = 'MESA';
 
-                // Sobrante intermedio: fue reutilizado → limpiar
-                _tubosConsumidos.splice(idxConsumo, 1); // balancear
+                _tubosConsumidos.splice(idxConsumo, 1);
 
-                // Purgar el fantasma de colmenasHistorico (buscar entrada disponible con esa medida y código)
                 const medidaFantasma = Math.round(res.sobrante_cm * 10);
                 const idxFantasma = SistemaInventario.colmenasHistorico.findIndex(c =>
                     c.estado === 'disponible' &&
@@ -2559,7 +2554,6 @@ function ejecutarOptimizacion() {
                     log(`🧹 Sobrante intermedio eliminado de colmenas: ${codigoRes} ${res.sobrante_cm}cm`, 'info');
                 }
 
-                // También purgar de colmenasDisponibles
                 const idxDispFantasma = SistemaInventario.colmenasDisponibles.findIndex(c =>
                     c.cod === codigoRes &&
                     c.medida_mm === medidaFantasma
@@ -2568,7 +2562,6 @@ function ejecutarOptimizacion() {
                     SistemaInventario.colmenasDisponibles.splice(idxDispFantasma, 1);
                 }
 
-                // Marcar como intermedio (visible para el operario, invisible para la BD)
                 res.es_intermedio = true;
             }
         }
