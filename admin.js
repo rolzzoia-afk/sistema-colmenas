@@ -715,10 +715,23 @@ async function ejecutarRollback() {
         }
         console.log(`🏷️ Historial etiquetado — REVERTIDO: ${contadorRevertido}, CASCADA: ${contadorCascada}`);
 
+        // 4. Escribir una señal en Firebase para que el taller limpie su caché local
+        // al recibir el próximo onSnapshot (ots_procesadas_hoy y localStorage stale)
+        await window.fbSetDoc(
+            window.fbDoc(db, "usuarios", usuarioSeleccionado, "control", "cache_reset"),
+            {
+                solicitadoPor: adminEmail,
+                fechaSolicitud: new Date().toISOString(),
+                motivo: "rollback",
+                limpiarOts: true
+            }
+        );
+        console.log("🧹 Señal de limpieza de caché enviada al taller");
+
         const cascadaMsg = contadorCascada > 0
             ? `\n• ${contadorCascada} operación(es) posterior(es) anulada(s) por cascada`
             : '';
-        alert(`Rollback completado exitosamente.\n\nMotivo: "${motivoError.trim()}"\n\n• ${snapshotColmenas.length} colmenas restauradas\n• ${snapshotSeriales.length} seriales restaurados${cascadaMsg}`);
+        alert(`Rollback completado exitosamente.\n\nMotivo: "${motivoError.trim()}"\n\n• ${snapshotColmenas.length} colmenas restauradas\n• ${snapshotSeriales.length} seriales restaurados${cascadaMsg}\n\n⚠️ El operario debe RECARGAR la página del taller antes de hacer el nuevo corte.`);
         cerrarModal();
 
     } catch (error) {

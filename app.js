@@ -258,6 +258,23 @@ function cargarDesdeFirestore() {
 
     // Cargar colmena_final y registrar listener real-time
     cargarColmenaFinalDesdeFirestore();
+
+    // ── Listener de señal de cache_reset (enviada por admin tras rollback) ──
+    const cacheResetRef = window.firebaseDoc(db, "usuarios", user.email, "control", "cache_reset");
+    window.firebaseOnSnapshot(cacheResetRef, { includeMetadataChanges: false }, (snap) => {
+        if (!snap.exists() || snap.metadata.hasPendingWrites) return;
+        const data = snap.data();
+        if (data && data.limpiarOts) {
+            // Limpiar caché local de OTs procesadas para habilitar reprocesamiento post-rollback
+            localStorage.removeItem('ots_procesadas_hoy');
+            localStorage.removeItem('sistemaInventario');
+            console.log("🧹 Caché local limpiada por señal de rollback del administrador");
+            log("🔄 El administrador revirtió una operación. La página se recargará en 3 segundos...", "warn");
+            setTimeout(() => { location.reload(); }, 3000);
+        }
+    }, (error) => {
+        console.warn("Error en listener cache_reset:", error.message);
+    });
 }
 
 // Función para guardar resultados de optimización en Firestore
@@ -2259,8 +2276,7 @@ function ejecutarOptimizacion() {
                     fecha: tuboEncontrado.colmena.serial ? tuboEncontrado.colmena.serial.fecha : null
                 });
                 }
-                // CORRECCIÓN: primero eliminar el tubo origen (índice válido), luego agregar sobrante
-                SistemaInventario.colmenasDisponibles.splice(tuboEncontrado.indice, 1);
+                // Inyectar sobrante con la colmena destino correcta ANTES de push
                 SistemaInventario.colmenasDisponibles.push({
                     n_colmena: nColmenaDestino,
                     medida_mm: sobrante,
@@ -2268,6 +2284,7 @@ function ejecutarOptimizacion() {
                     cod: tuboEncontrado.colmena.cod,
                     serial: tuboEncontrado.colmena.serial || orden.serial || null
                 });
+                SistemaInventario.colmenasDisponibles.splice(tuboEncontrado.indice, 1);
             }
         } else {
             const listaReemplazos = buscarReemplazos(codOrden);
@@ -2330,8 +2347,7 @@ function ejecutarOptimizacion() {
                                 if (idxHistoricoExistente !== -1) {
                                     SistemaInventario.colmenasHistorico.splice(idxHistoricoExistente + 1, 0, { n_colmena: colmenaExistente.n_colmena, medida_cm: sobrante / 10, medida_mm: sobrante, cod: codReemplazo, codigo_original: tuboReemplazo.colmena.cod, estado: 'disponible', origen: 'Sobrante reemplazo orden ' + orden.id, posicionOriginal: colmenaExistente.n_colmena, serial: tuboReemplazo.colmena.serial || null, fecha: tuboReemplazo.colmena.serial ? tuboReemplazo.colmena.serial.fecha : null });
                                 }
-                                // CORRECCIÓN: primero eliminar el tubo origen (índice válido), luego agregar sobrante
-                                SistemaInventario.colmenasDisponibles.splice(tuboReemplazo.indice, 1);
+                                // CORRECCIÓN TRAZABILIDAD: sobrante con colmena destino correcta
                                 SistemaInventario.colmenasDisponibles.push({
                                     n_colmena: colmenaExistente.n_colmena,
                                     medida_mm: sobrante,
@@ -2339,12 +2355,12 @@ function ejecutarOptimizacion() {
                                     cod: codReemplazo,
                                     serial: tuboReemplazo.colmena.serial || null
                                 });
+                            } else {
                                 const idxInsertar = SistemaInventario.colmenasHistorico.findIndex(c => c.n_colmena === tuboReemplazo.colmena.n_colmena);
                                 if (idxInsertar !== -1) {
                                     SistemaInventario.colmenasHistorico.splice(idxInsertar + 1, 0, { n_colmena: tuboReemplazo.colmena.n_colmena, medida_cm: sobrante / 10, medida_mm: sobrante, cod: tuboReemplazo.colmena.cod, codigo_original: tuboReemplazo.colmena.cod, estado: 'disponible', origen: 'Sobrante reemplazo orden ' + orden.id, posicionOriginal: tuboReemplazo.colmena.n_colmena, serial: tuboReemplazo.colmena.serial || null, fecha: tuboReemplazo.colmena.serial ? tuboReemplazo.colmena.serial.fecha : null });
                                 }
-                                // CORRECCIÓN: primero eliminar el tubo origen (índice válido), luego agregar sobrante
-                                SistemaInventario.colmenasDisponibles.splice(tuboReemplazo.indice, 1);
+                                // CORRECCIÓN TRAZABILIDAD: sobrante con colmena destino correcta
                                 SistemaInventario.colmenasDisponibles.push({
                                     n_colmena: tuboReemplazo.colmena.n_colmena,
                                     medida_mm: sobrante,
@@ -2739,7 +2755,10 @@ async function capturarSnapshotPreOptimizacion() {
     let snapshotColmenas = [];
     let snapshotSeriales = [];
 
-    // ── Colmenas: leer directamente del servidor (bypass de caché) ──
+    // ── Colmenas: SIEMPRE leer desde el servidor (la fuente de verdad real) ──
+    // CRÍTICO: NO usar colmenaCruda como fallback porque puede contener
+    // estado post-corte de una optimización anterior en la misma sesión.
+    // Si getDocFromServer falla, usar colmenaActual (última sincronización Firebase).
     try {
         const colmenaRef = window.firebaseDoc(db, "usuarios", user.email, "colmena_final", "datos");
         const colmenaSnap = await window.firebaseGetDocFromServer(colmenaRef);
@@ -2751,14 +2770,16 @@ async function capturarSnapshotPreOptimizacion() {
         }
         console.log(`📸 Snapshot colmenas capturado desde servidor: ${snapshotColmenas.length} registros`);
     } catch (fbErr) {
-        console.warn("getDocFromServer falló para snapshot de colmenas, usando copias inmutables:", fbErr.message);
-        // Fallback: copias inmutables tomadas al inicio de ejecutarOptimizacion (estado pre-corte)
-        snapshotColmenas = SistemaInventario.colmenaCruda.length > 0
-            ? JSON.parse(JSON.stringify(SistemaInventario.colmenaCruda))
-            : (colmenaActual ? JSON.parse(JSON.stringify(colmenaActual)) : []);
+        console.warn("getDocFromServer falló para snapshot de colmenas, usando colmenaActual:", fbErr.message);
+        // Fallback SEGURO: colmenaActual viene de onSnapshot y refleja el último estado
+        // confirmado en Firebase, nunca el estado calculado localmente.
+        snapshotColmenas = colmenaActual ? JSON.parse(JSON.stringify(colmenaActual)) : [];
+        console.log(`📸 Snapshot colmenas (fallback onSnapshot): ${snapshotColmenas.length} registros`);
     }
 
-    // ── Seriales: usar la copia inmutable pre-optimización ──
+    // ── Seriales: usar la copia inmutable tomada AL INICIO de ejecutarOptimizacion ──
+    // serialesCrudos se toma ANTES de marcar ningún serial como ocupado,
+    // por lo que siempre refleja el estado pre-corte real.
     snapshotSeriales = SistemaInventario.serialesCrudos.length > 0
         ? JSON.parse(JSON.stringify(SistemaInventario.serialesCrudos))
         : JSON.parse(JSON.stringify(SistemaInventario.seriales));
@@ -2826,6 +2847,8 @@ async function confirmarYGuardarStaging() {
     await guardarColmenaFinalEnFirestore();
 
     // ── PASO 3b: Marcar OTs como procesadas hoy (protección anti-duplicados) ──
+    // NOTA: Este registro se limpia automáticamente si el admin hace rollback
+    // desde el panel Ojo de Dios, para permitir reprocesar sin bloqueo.
     const hoy = new Date().toISOString().split('T')[0];
     const otsProcesadas = JSON.parse(localStorage.getItem('ots_procesadas_hoy') || '{}');
     // Limpiar OTs de días anteriores
@@ -2989,6 +3012,9 @@ function descartarStaging() {
     SistemaInventario.serialesCrudos = [];
     SistemaInventario.colmenaCruda = [];
     SistemaInventario.overridesNuevos = {};
+
+    // ── Limpiar OTs procesadas hoy para que un post-rollback no quede bloqueado ──
+    localStorage.removeItem('ots_procesadas_hoy');
 
     // ── Limpieza visual de inputs de archivo: forzar re-selección ──
     ['fileOrdenes', 'fileColmenas', 'fileCatalogo', 'fileEstructura'].forEach(id => {
