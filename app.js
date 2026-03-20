@@ -7,7 +7,7 @@ function limpiarNumero(valor) {
     return isNaN(num) ? 0 : num;
 }
 
-const VERSION_ACTUAL = "3.2";
+const VERSION_ACTUAL = "3.3";
 
 const MM_TUBO_ORIGINAL = 5780;
 const MM_KERF = 3;
@@ -3115,11 +3115,11 @@ async function exportarResultados() {
         }
     });
 
-    // ─── Limpieza de sobrantes intermedios (inventario fantasma) ───
-    // Recorrer de atrás hacia adelante: si un GUARDAR SOBRANTE fue consumido
-    // más abajo como Tubo Origen de un CORTAR, es intermedio y se elimina.
-    // Llave simplificada: Código|Medida (sin Lote/Serial, que son '-' en sobrantes)
-    const tubosConsumidos = []; // Cada elemento: { llave, filaIdx } para rastrear el consumidor
+    // ─── Reordenar sobrantes intermedios (RESERVAR EN MESA antes del CORTAR que los usa) ───
+    // Recorrer de atrás hacia adelante: si un sobrante fue reutilizado como tubo de MESA,
+    // moverlo justo ANTES del CORTAR MESA que lo consume, para que el operario lea en orden.
+    // Llave: Código|Medida
+    const tubosConsumidos = [];
     for (let f = datosExcel.length - 1; f >= 1; f--) {
         const fila = datosExcel[f];
         const accion = String(fila[2] || '').toUpperCase();
@@ -3136,14 +3136,28 @@ async function exportarResultados() {
                 const llaveSobrante = `${codigo}|${medidaSob.toFixed(1)}`;
                 const idxConsumo = tubosConsumidos.findIndex(t => t.llave === llaveSobrante);
                 if (idxConsumo !== -1) {
-                    // Re-etiquetar la fila CORTAR consumidora: su tubo vino de MESA
-                    const filaConsumidor = datosExcel[tubosConsumidos[idxConsumo].filaIdx];
-                    if (filaConsumidor) {
-                        filaConsumidor[3] = 'MESA'; // Columna "Colmena" → MESA
-                    }
-                    // Sobrante intermedio: fue reutilizado más abajo → eliminar
-                    tubosConsumidos.splice(idxConsumo, 1);
+                    const consumidorIdx = tubosConsumidos[idxConsumo].filaIdx;
+                    const filaConsumidor = datosExcel[consumidorIdx];
+
+                    // Re-etiquetar el CORTAR consumidor: su tubo viene de MESA
+                    if (filaConsumidor) filaConsumidor[3] = 'MESA';
+
+                    // Transformar GUARDAR SOBRANTE → RESERVAR EN MESA
+                    const filaReserva = [...datosExcel[f]];
+                    filaReserva[2] = 'RESERVAR EN MESA';
+                    filaReserva[3] = '-';
+
+                    // Eliminar la fila sobrante en su posición original
                     datosExcel.splice(f, 1);
+
+                    // Recalcular índice del consumidor tras el splice
+                    // (si el sobrante estaba antes del consumidor, el índice baja en 1)
+                    const consumidorIdxAjustado = f < consumidorIdx ? consumidorIdx - 1 : consumidorIdx;
+
+                    // Insertar RESERVAR EN MESA justo antes del CORTAR MESA que lo consume
+                    datosExcel.splice(consumidorIdxAjustado, 0, filaReserva);
+
+                    tubosConsumidos.splice(idxConsumo, 1);
                 }
             }
         }
