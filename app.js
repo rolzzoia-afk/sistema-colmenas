@@ -7,7 +7,7 @@ function limpiarNumero(valor) {
     return isNaN(num) ? 0 : num;
 }
 
-const VERSION_ACTUAL = "2.6";
+const VERSION_ACTUAL = "2.7";
 
 const MM_TUBO_ORIGINAL = 5780;
 const MM_KERF = 3;
@@ -472,22 +472,6 @@ function cargarSistema() {
 
 // Cargar automáticamente al inicio
 cargarSistema();
-
-// ── Limpiar colmenas del localStorage al arrancar ──
-// Las colmenas SIEMPRE vienen de Firebase (colmena_final via onSnapshot).
-// Si hay datos de colmenas en localStorage pueden ser stale post-rollback
-// y contaminar la optimización antes de que Firebase responda.
-if (localStorage.getItem('sistemaInventario')) {
-    try {
-        const cached = JSON.parse(localStorage.getItem('sistemaInventario'));
-        // Borrar colmenas del caché para forzar que vengan de Firebase
-        if (cached && cached.colmenas) {
-            cached.colmenas = [];
-            cached.colmenaCruda = [];
-            localStorage.setItem('sistemaInventario', JSON.stringify(cached));
-        }
-    } catch(e) { /* ignorar error de parse */ }
-}
 
 // ─── FUNCIONES DE SERIALES (Estructura de Inventario) ───────────────────────────
 
@@ -2121,19 +2105,12 @@ function ejecutarOptimizacion() {
     // ── Determinar fuente de colmenas: deep-copy fresca desde la fuente autoritativa ──
     // CRÍTICO: siempre clonar para romper cualquier referencia a estados anteriores
     let colmenasAUsar;
-    if (colmenaActual && colmenaActual.length > 0) {
-        // Firebase es la fuente definitiva — garantiza que rollback se aplique correctamente
-        colmenasAUsar = JSON.parse(JSON.stringify(colmenaActual));
-        if (usandoColmenaManual) {
-            log('ℹ️ Excel manual ignorado — usando Firebase (puede haber rollback activo)', 'info');
-            usandoColmenaManual = false;
-        }
-    } else if (usandoColmenaManual && SistemaInventario.colmenas.length > 0) {
-        // Solo usar Excel manual si Firebase no tiene nada (primera carga)
+    if (usandoColmenaManual) {
         colmenasAUsar = JSON.parse(JSON.stringify(SistemaInventario.colmenas));
+    } else if (colmenaActual && colmenaActual.length > 0) {
+        colmenasAUsar = JSON.parse(JSON.stringify(colmenaActual));
     } else {
-        alert('No hay colmenas. Espere la sincronización con Firebase o cargue un archivo.');
-        return;
+        colmenasAUsar = JSON.parse(JSON.stringify(SistemaInventario.colmenas));
     }
 
     if (SistemaInventario.ordenes.length === 0 || colmenasAUsar.length === 0) { alert('Cargue órdenes y colmenas'); return; }
@@ -2754,36 +2731,24 @@ function renderizarStaging(resultados) {
 // Devuelve un objeto con las colmenas y seriales tal como están en Firebase en este instante.
 // Se ejecuta ANTES de guardarSistema() y guardarColmenaFinalEnFirestore() para evitar race conditions.
 async function capturarSnapshotPreOptimizacion() {
-    const user = window.firebaseAuth.currentUser;
-    if (!user || !user.email) return null;
-
-    const db = window.firebaseDb;
-    let snapshotColmenas = [];
-    let snapshotSeriales = [];
-
-    // ── Colmenas: leer directamente del servidor (bypass de caché) ──
-    try {
-        const colmenaRef = window.firebaseDoc(db, "usuarios", user.email, "colmena_final", "datos");
-        const colmenaSnap = await window.firebaseGetDocFromServer(colmenaRef);
-        if (colmenaSnap && colmenaSnap.exists()) {
-            const colData = colmenaSnap.data();
-            if (colData && colData.data) {
-                snapshotColmenas = JSON.parse(colData.data) || [];
-            }
-        }
-        console.log(`📸 Snapshot colmenas capturado desde servidor: ${snapshotColmenas.length} registros`);
-    } catch (fbErr) {
-        console.warn("getDocFromServer falló para snapshot de colmenas, usando copias inmutables:", fbErr.message);
-        // Fallback: copias inmutables tomadas al inicio de ejecutarOptimizacion (estado pre-corte)
-        snapshotColmenas = SistemaInventario.colmenaCruda.length > 0
-            ? JSON.parse(JSON.stringify(SistemaInventario.colmenaCruda))
-            : (colmenaActual ? JSON.parse(JSON.stringify(colmenaActual)) : []);
+    // DIAGNÓSTICO: mostrar exactamente qué tiene colmenaActual en este instante
+    console.warn("📸 CAPTURANDO SNAPSHOT — colmenaActual tiene:", colmenaActual ? colmenaActual.length : "NULL/vacío", "colmenas");
+    if (colmenaActual && colmenaActual.length > 0) {
+        console.warn("📸 Primeras 3 colmenas de colmenaActual:", JSON.stringify(colmenaActual.slice(0,3)));
     }
 
-    // ── Seriales: usar la copia inmutable pre-optimización ──
-    snapshotSeriales = SistemaInventario.serialesCrudos.length > 0
+    // Fuente única: colmenaActual (onSnapshot de Firebase, siempre pre-corte en este punto)
+    const snapshotColmenas = colmenaActual
+        ? JSON.parse(JSON.stringify(colmenaActual))
+        : [];
+
+    const snapshotSeriales = SistemaInventario.serialesCrudos.length > 0
         ? JSON.parse(JSON.stringify(SistemaInventario.serialesCrudos))
         : JSON.parse(JSON.stringify(SistemaInventario.seriales));
+
+    const disponibles = snapshotSeriales.filter(s => s.estado === 'disponible').length;
+    console.warn("📸 SNAPSHOT FINAL:", snapshotColmenas.length, "colmenas,", disponibles, "seriales disponibles");
+    log(`📸 DIAGNÓSTICO SNAPSHOT: ${snapshotColmenas.length} colmenas, ${disponibles} tubos disponibles`, 'info');
 
     return { colmenas: snapshotColmenas, seriales: snapshotSeriales };
 }
@@ -2817,6 +2782,13 @@ async function guardarPuntoRestauracion(snapshotIntacto) {
 
         const colRef = window.firebaseCollection(db, "usuarios", user.email, "historial_operaciones");
         await window.firebaseAddDoc(colRef, registro);
+
+        // ── DIAGNÓSTICO: mostrar qué se guardó en el snapshot ──
+        const _snapCols = snapshotIntacto.colmenas.length;
+        const _snapSers = snapshotIntacto.seriales.filter(s => s.estado === 'disponible').length;
+        console.warn(`📸 SNAPSHOT GUARDADO: ${_snapCols} colmenas, ${_snapSers} seriales disponibles`);
+        console.table(snapshotIntacto.colmenas.slice(0, 10)); // primeras 10 colmenas del snapshot
+        log(`📸 SNAPSHOT: ${_snapCols} colmenas guardadas en historial (${_snapSers} tubos disponibles)`, 'success');
 
         log('📸 Punto de restauración guardado en historial.', 'info');
     } catch (error) {

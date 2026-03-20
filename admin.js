@@ -501,10 +501,20 @@ function renderizarHistorial() {
         const motivoHtml = esAnulado && op.motivo_error
             ? `<div style="font-size:10px;color:#e57373;margin-top:3px;font-style:italic;">Motivo: ${op.motivo_error}</div>`
             : '';
+        // Diagnóstico: mostrar cuántas colmenas tiene el snapshot guardado
+        let snapshotInfo = '-';
+        try {
+            const snapColmenas = JSON.parse(op.snapshot_inventario || '[]');
+            const snapSeriales = JSON.parse(op.snapshot_seriales || '[]');
+            const disponibles = snapSeriales.filter(s => s.estado === 'disponible').length;
+            snapshotInfo = `<span style="font-size:10px;color:#00d2ff;">${snapColmenas.length} colmenas / ${disponibles} tubos</span>`;
+        } catch(e) { snapshotInfo = '<span style="color:#e74c3c;font-size:10px;">⚠️ Sin snapshot</span>'; }
+
         return `<tr ${rowStyle}>
             <td>${fechaStr}${badgeHtml}</td>
             <td>${op.nombre_excel || '-'}${motivoHtml}</td>
             <td>${op.total_cortes || '-'}</td>
+            <td>${snapshotInfo}</td>
             <td>
                 <button onclick="abrirModalHistorial(${idx})" style="background:#3498db;color:white;border:none;padding:5px 12px;border-radius:4px;cursor:pointer;font-size:11px;">Ver Detalle</button>
             </td>
@@ -715,23 +725,10 @@ async function ejecutarRollback() {
         }
         console.log(`🏷️ Historial etiquetado — REVERTIDO: ${contadorRevertido}, CASCADA: ${contadorCascada}`);
 
-        // 4. Escribir una señal en Firebase para que el taller limpie su caché local
-        // al recibir el próximo onSnapshot (ots_procesadas_hoy y localStorage stale)
-        await window.fbSetDoc(
-            window.fbDoc(db, "usuarios", usuarioSeleccionado, "control", "cache_reset"),
-            {
-                solicitadoPor: adminEmail,
-                fechaSolicitud: new Date().toISOString(),
-                motivo: "rollback",
-                limpiarOts: true
-            }
-        );
-        console.log("🧹 Señal de limpieza de caché enviada al taller");
-
         const cascadaMsg = contadorCascada > 0
             ? `\n• ${contadorCascada} operación(es) posterior(es) anulada(s) por cascada`
             : '';
-        alert(`Rollback completado exitosamente.\n\nMotivo: "${motivoError.trim()}"\n\n• ${snapshotColmenas.length} colmenas restauradas\n• ${snapshotSeriales.length} seriales restaurados${cascadaMsg}\n\n⚠️ El operario debe RECARGAR la página del taller antes de hacer el nuevo corte.`);
+        alert(`Rollback completado exitosamente.\n\nMotivo: "${motivoError.trim()}"\n\n• ${snapshotColmenas.length} colmenas restauradas\n• ${snapshotSeriales.length} seriales restaurados${cascadaMsg}`);
         cerrarModal();
 
     } catch (error) {
