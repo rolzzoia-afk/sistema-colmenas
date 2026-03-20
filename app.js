@@ -7,7 +7,7 @@ function limpiarNumero(valor) {
     return isNaN(num) ? 0 : num;
 }
 
-const VERSION_ACTUAL = "3.1";
+const VERSION_ACTUAL = "3.2";
 
 const MM_TUBO_ORIGINAL = 5780;
 const MM_KERF = 3;
@@ -398,7 +398,7 @@ async function guardarColmenaFinalEnFirestore() {
 
         // Extraer colmenas disponibles del histórico y mapear al formato simple
         // IMPORTANTE: incluir serial para preservar la trazabilidad en optimizaciones sucesivas
-        const _colmenasRaw = SistemaInventario.colmenasHistorico
+        const colmenasFinal = SistemaInventario.colmenasHistorico
             .filter(c => c.estado === 'disponible' && c.medida_mm > 0 && c.cod)
             .map(c => ({
                 n_colmena: c.n_colmena,
@@ -407,20 +407,6 @@ async function guardarColmenaFinalEnFirestore() {
                 cod: c.cod,
                 serial: c.serial || null
             }));
-        // Una colmena física solo puede tener UN tubo por código.
-        // Si hay duplicados (acumulados de sesiones anteriores), quedarse
-        // solo con la entrada de MAYOR medida — el tubo más largo real.
-        const _mapaColmenas = {};
-        for (const c of _colmenasRaw) {
-            const llave = c.n_colmena + '|' + c.cod;
-            if (!_mapaColmenas[llave] || c.medida_mm > _mapaColmenas[llave].medida_mm) {
-                _mapaColmenas[llave] = c;
-            }
-        }
-        const colmenasFinal = Object.values(_mapaColmenas);
-        if (_colmenasRaw.length !== colmenasFinal.length) {
-            console.warn('🧹 Duplicados eliminados al guardar:', _colmenasRaw.length - colmenasFinal.length, 'entradas removidas');
-        }
 
         const datos = {
             data: JSON.stringify(colmenasFinal),
