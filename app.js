@@ -7,7 +7,7 @@ function limpiarNumero(valor) {
     return isNaN(num) ? 0 : num;
 }
 
-const VERSION_ACTUAL = "3.9";
+const VERSION_ACTUAL = "4.0";
 
 const MM_TUBO_ORIGINAL = 5780;
 const MM_KERF = 3;
@@ -3066,9 +3066,7 @@ async function exportarResultados() {
         // res.color ya se setea en ejecutarOptimizacion; fallback a lookup directo
         const color = res.color || obtenerColorDeCatalogo(codigoReal);
 
-        // Acción descriptiva según fuente y componente
         const _comp = (ord.componente && ord.componente !== 'TUBO') ? ord.componente : '';
-        // Reemplazo de código descontinuado abriendo tubo nuevo (fuente='reemplazo' + colmena nueva)
         const _esTuboNuevoReemplazo = res.fuente === 'reemplazo'
             && res.codigo_original && res.codigo && res.codigo !== res.codigo_original
             && res.codigo_reemplazo;
@@ -3138,32 +3136,47 @@ async function exportarResultados() {
         }
     });
 
-    // ─── Reordenar sobrantes intermedios: RESERVAR EN MESA antes del CORTAR que los consume ───
+    // ─── Paso 2: procesar GUARDAR SOBRANTE reutilizados ───
+    // Los RESERVAR EN MESA ya están correctamente posicionados junto a su corte
+    // (generados en el loop anterior cuando es_intermedio=true). No tocarlos.
+    // Solo procesar GUARDAR SOBRANTE que fueron consumidos más abajo como tubo origen.
     const tubosConsumidos = [];
     for (let f = datosExcel.length - 1; f >= 1; f--) {
         const fila = datosExcel[f];
         const accion = String(fila[2] || '').toUpperCase();
         const codigo = fila[4];
+
         if (accion.includes('CORTAR')) {
             const origen = Number(fila[7]);
             if (!isNaN(origen) && origen > 0) {
                 tubosConsumidos.push({ llave: `${codigo}|${origen.toFixed(1)}`, filaIdx: f });
             }
-        } else if (accion.includes('GUARDAR SOBRANTE') || accion.includes('DESECHAR MERMA')) {
+        } else if (accion === 'GUARDAR SOBRANTE') {
+            // Solo GUARDAR SOBRANTE — nunca tocar RESERVAR EN MESA ya colocados
             const medidaSob = Number(fila[6]);
             if (!isNaN(medidaSob) && medidaSob > 0) {
                 const llaveSobrante = `${codigo}|${medidaSob.toFixed(1)}`;
                 const idxConsumo = tubosConsumidos.findIndex(t => t.llave === llaveSobrante);
                 if (idxConsumo !== -1) {
+                    // Re-etiquetar el CORTAR consumidor: su tubo vino de MESA
                     const consumidorIdx = tubosConsumidos[idxConsumo].filaIdx;
                     const filaConsumidor = datosExcel[consumidorIdx];
                     if (filaConsumidor) filaConsumidor[3] = 'MESA';
+
+                    // Convertir GUARDAR SOBRANTE → RESERVAR EN MESA
                     const filaReserva = [...datosExcel[f]];
                     filaReserva[2] = 'RESERVAR EN MESA';
                     filaReserva[3] = '-';
+
+                    // Eliminar de posición original
                     datosExcel.splice(f, 1);
+
+                    // Recalcular índice consumidor tras splice
                     const consumidorIdxAjustado = f < consumidorIdx ? consumidorIdx - 1 : consumidorIdx;
+
+                    // Insertar RESERVAR EN MESA justo antes del CORTAR MESA
                     datosExcel.splice(consumidorIdxAjustado, 0, filaReserva);
+
                     tubosConsumidos.splice(idxConsumo, 1);
                 }
             }
