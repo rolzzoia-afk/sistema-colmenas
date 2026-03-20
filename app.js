@@ -7,7 +7,7 @@ function limpiarNumero(valor) {
     return isNaN(num) ? 0 : num;
 }
 
-const VERSION_ACTUAL = "3.6";
+const VERSION_ACTUAL = "3.7";
 
 const MM_TUBO_ORIGINAL = 5780;
 const MM_KERF = 3;
@@ -3071,10 +3071,20 @@ async function exportarResultados() {
         // res.color ya se setea en ejecutarOptimizacion; fallback a lookup directo
         const color = res.color || obtenerColorDeCatalogo(codigoReal);
 
-        // Acción descriptiva según componente
-        let accionCortar = 'CORTAR';
-        if (ord.componente && ord.componente !== 'TUBO') {
+        // Acción descriptiva según fuente y componente
+        let accionCortar;
+        if (res.fuente === 'tubo_nuevo' && res.codigo_original && res.codigo !== res.codigo_original) {
+            // Tubo nuevo abierto como reemplazo de código descontinuado
+            const comp = (ord.componente && ord.componente !== 'TUBO') ? ord.componente : 'TUBO';
+            accionCortar = `TUBO NUEVO (REEMPLAZO ${res.codigo_original} → ${res.codigo})`;
+        } else if (res.fuente === 'tubo_nuevo') {
+            // Tubo nuevo normal
+            const comp = (ord.componente && ord.componente !== 'TUBO') ? ord.componente : '';
+            accionCortar = comp ? `${comp} NUEVO` : 'TUBO NUEVO';
+        } else if (ord.componente && ord.componente !== 'TUBO') {
             accionCortar = `CORTAR ${ord.componente}`;
+        } else {
+            accionCortar = 'CORTAR';
         }
 
         // Fila CORTAR
@@ -3129,7 +3139,6 @@ async function exportarResultados() {
     });
 
     // ─── Reordenar sobrantes intermedios: RESERVAR EN MESA antes del CORTAR que los consume ───
-    // Llave única: Código|Medida|FilaIdx para distinguir sobrantes idénticos de tubos distintos
     const tubosConsumidos = [];
     for (let f = datosExcel.length - 1; f >= 1; f--) {
         const fila = datosExcel[f];
@@ -3139,36 +3148,23 @@ async function exportarResultados() {
         if (accion.includes('CORTAR')) {
             const origen = Number(fila[7]);
             if (!isNaN(origen) && origen > 0) {
-                // Incluir filaIdx en llave para que dos CORTAR del mismo código+medida
-                // solo consuman el sobrante que les corresponde (no el del otro tubo)
                 tubosConsumidos.push({ llave: `${codigo}|${origen.toFixed(1)}`, filaIdx: f });
             }
         } else if (accion.includes('GUARDAR SOBRANTE') || accion.includes('DESECHAR MERMA')) {
             const medidaSob = Number(fila[6]);
             if (!isNaN(medidaSob) && medidaSob > 0) {
                 const llaveSobrante = `${codigo}|${medidaSob.toFixed(1)}`;
-                // Buscar el consumidor MÁS CERCANO hacia abajo (último en el stack)
-                // para que sobrantes idénticos se emparejen con el corte correcto
                 const idxConsumo = tubosConsumidos.findIndex(t => t.llave === llaveSobrante);
                 if (idxConsumo !== -1) {
                     const consumidorIdx = tubosConsumidos[idxConsumo].filaIdx;
                     const filaConsumidor = datosExcel[consumidorIdx];
                     if (filaConsumidor) filaConsumidor[3] = 'MESA';
-
-                    // Transformar en RESERVAR EN MESA y moverlo justo antes del CORTAR MESA
                     const filaReserva = [...datosExcel[f]];
                     filaReserva[2] = 'RESERVAR EN MESA';
                     filaReserva[3] = '-';
-
-                    // Eliminar de posición original
                     datosExcel.splice(f, 1);
-
-                    // Recalcular índice del consumidor tras el splice
                     const consumidorIdxAjustado = f < consumidorIdx ? consumidorIdx - 1 : consumidorIdx;
-
-                    // Insertar RESERVAR EN MESA justo antes del CORTAR MESA
                     datosExcel.splice(consumidorIdxAjustado, 0, filaReserva);
-
                     tubosConsumidos.splice(idxConsumo, 1);
                 }
             }
