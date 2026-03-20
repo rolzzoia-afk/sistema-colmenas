@@ -7,7 +7,7 @@ function limpiarNumero(valor) {
     return isNaN(num) ? 0 : num;
 }
 
-const VERSION_ACTUAL = "2.8";
+const VERSION_ACTUAL = "2.9";
 
 const MM_TUBO_ORIGINAL = 5780;
 const MM_KERF = 3;
@@ -340,7 +340,7 @@ async function cargarColmenaFinalDesdeFirestore() {
             if (snap.exists() && !snap.metadata.hasPendingWrites) {
                 const data = snap.data();
                 if (data && data.data) {
-                    colmenaActual = JSON.parse(data.data) || [];
+                    colmenaActual = deduplicarColmenas(JSON.parse(data.data) || []);
                     SistemaInventario.colmenas = colmenaActual;
                     actualizarTablaColmenas();
                     actualizarIndicadorFuente(false);
@@ -371,7 +371,7 @@ async function cargarColmenaFinalDesdeFirestore() {
         if (docSnap && docSnap.exists()) {
             const docData = docSnap.data();
             if (docData && docData.data) {
-                colmenaActual = JSON.parse(docData.data);
+                colmenaActual = deduplicarColmenas(JSON.parse(docData.data));
                 SistemaInventario.colmenas = colmenaActual;
                 actualizarTablaColmenas();
                 actualizarIndicadorFuente(false);
@@ -382,6 +382,31 @@ async function cargarColmenaFinalDesdeFirestore() {
     } catch (error) {
         console.warn("getDocFromServer falló, el listener onSnapshot seguirá activo:", error.message);
     }
+}
+
+// ── Deduplicar colmenas: si hay varias entradas con el mismo n_colmena+cod,
+// quedarse solo con la de MENOR medida (el sobrante más reciente y real).
+// Esto limpia duplicados acumulados por cortes anteriores en Firebase.
+function deduplicarColmenas(colmenas) {
+    if (!colmenas || colmenas.length === 0) return [];
+    const mapa = {};
+    for (const c of colmenas) {
+        const llave = `${c.n_colmena}|${c.cod}`;
+        if (!mapa[llave]) {
+            mapa[llave] = c;
+        } else {
+            // Quedarse con la de menor medida (el sobrante más reciente)
+            if (c.medida_mm < mapa[llave].medida_mm) {
+                mapa[llave] = c;
+            }
+        }
+    }
+    const resultado = Object.values(mapa);
+    const eliminados = colmenas.length - resultado.length;
+    if (eliminados > 0) {
+        console.warn(`🧹 deduplicarColmenas: eliminados ${eliminados} duplicados de ${colmenas.length} → ${resultado.length}`);
+    }
+    return resultado;
 }
 
 // Guarda las colmenas disponibles post-optimización en Firebase como colmena_final
@@ -398,7 +423,7 @@ async function guardarColmenaFinalEnFirestore() {
 
         // Extraer colmenas disponibles del histórico y mapear al formato simple
         // IMPORTANTE: incluir serial para preservar la trazabilidad en optimizaciones sucesivas
-        const colmenasFinal = SistemaInventario.colmenasHistorico
+        const colmenasFinalRaw = SistemaInventario.colmenasHistorico
             .filter(c => c.estado === 'disponible' && c.medida_mm > 0 && c.cod)
             .map(c => ({
                 n_colmena: c.n_colmena,
@@ -407,6 +432,8 @@ async function guardarColmenaFinalEnFirestore() {
                 cod: c.cod,
                 serial: c.serial || null
             }));
+        // Deduplicar: una colmena física nunca puede tener más de una entrada por código
+        const colmenasFinal = deduplicarColmenas(colmenasFinalRaw);
 
         const datos = {
             data: JSON.stringify(colmenasFinal),
@@ -2222,8 +2249,8 @@ function ejecutarOptimizacion() {
                 // CORRECCIÓN: eliminar el tubo de colmenasDisponibles (el slot queda vacío)
                 SistemaInventario.colmenasDisponibles.splice(tuboEncontrado.indice, 1);
                 if (idxHistorico !== -1) {
-                    // Colmena VACÍA tras merma — marcar como 'usada' para que NO vuelva al inventario
-                    SistemaInventario.colmenasHistorico[idxHistorico].estado = 'usada';
+                    // La colmena física queda VACÍA y DISPONIBLE: medida 0, código ''
+                    SistemaInventario.colmenasHistorico[idxHistorico].estado = 'disponible';
                     SistemaInventario.colmenasHistorico[idxHistorico].medida_mm = 0;
                     SistemaInventario.colmenasHistorico[idxHistorico].medida_cm = 0;
                     SistemaInventario.colmenasHistorico[idxHistorico].cod = '';
@@ -2308,8 +2335,8 @@ function ejecutarOptimizacion() {
                             // CORRECCIÓN: eliminar el tubo de colmenasDisponibles (el slot queda vacío)
                             SistemaInventario.colmenasDisponibles.splice(tuboReemplazo.indice, 1);
                             if (idxHistorico !== -1) {
-                                // Colmena VACÍA tras merma — marcar como 'usada' para que NO vuelva al inventario
-                                SistemaInventario.colmenasHistorico[idxHistorico].estado = 'usada';
+                                // La colmena física queda VACÍA y DISPONIBLE: medida 0, código ''
+                                SistemaInventario.colmenasHistorico[idxHistorico].estado = 'disponible';
                                 SistemaInventario.colmenasHistorico[idxHistorico].medida_mm = 0;
                                 SistemaInventario.colmenasHistorico[idxHistorico].medida_cm = 0;
                                 SistemaInventario.colmenasHistorico[idxHistorico].cod = '';
