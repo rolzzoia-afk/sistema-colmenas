@@ -7,7 +7,7 @@ function limpiarNumero(valor) {
     return isNaN(num) ? 0 : num;
 }
 
-const VERSION_ACTUAL = "3.7";
+const VERSION_ACTUAL = "3.8";
 
 const MM_TUBO_ORIGINAL = 5780;
 const MM_KERF = 3;
@@ -2360,7 +2360,6 @@ function ejecutarOptimizacion() {
             if (!resultado) {
                 let serialDisponible = buscarSerialDisponible(codOrden);
                 let codParaTuboNuevo = codOrden;
-
                 if (!serialDisponible) {
                     const reemplazosParaNuevo = buscarReemplazos(codOrden);
                     if (reemplazosParaNuevo && reemplazosParaNuevo.length > 0) {
@@ -2374,11 +2373,8 @@ function ejecutarOptimizacion() {
                             }
                         }
                     }
-                    if (!serialDisponible) {
-                        log(`⚠️ No hay serial disponible para ${codOrden} ni para ninguno de sus reemplazos`, 'warn');
-                    }
+                    if (!serialDisponible) log(`⚠️ No hay serial para ${codOrden} ni sus reemplazos`, 'warn');
                 }
-
                 const codBuscarMedida = String(codParaTuboNuevo || '').trim().toUpperCase();
                 let medidaNuevoCm = SistemaInventario.catalogoMedidas[codBuscarMedida] || (MM_TUBO_ORIGINAL / 10);
 
@@ -2436,7 +2432,6 @@ function ejecutarOptimizacion() {
                         nombreMaterialNuevo: nombreMaterialNuevo
                     };
                 }
-                
                 const codigoTuboNuevo = codParaTuboNuevo || 'TUBO-NUEVO';
                 
                 // Añadir información del serial al histórico si está disponible
@@ -3073,26 +3068,37 @@ async function exportarResultados() {
 
         // Acción descriptiva según fuente y componente
         let accionCortar;
-        if (res.fuente === 'tubo_nuevo' && res.codigo_original && res.codigo !== res.codigo_original) {
-            // Tubo nuevo abierto como reemplazo de código descontinuado
-            const comp = (ord.componente && ord.componente !== 'TUBO') ? ord.componente : 'TUBO';
-            accionCortar = `TUBO NUEVO (REEMPLAZO ${res.codigo_original} → ${res.codigo})`;
-        } else if (res.fuente === 'tubo_nuevo') {
-            // Tubo nuevo normal
-            const comp = (ord.componente && ord.componente !== 'TUBO') ? ord.componente : '';
-            accionCortar = comp ? `${comp} NUEVO` : 'TUBO NUEVO';
-        } else if (ord.componente && ord.componente !== 'TUBO') {
-            accionCortar = `CORTAR ${ord.componente}`;
+        const _esReemplazoDescontinuado = (res.fuente === 'reemplazo' || res.fuente === 'tubo_nuevo')
+            && res.codigo_original && res.codigo && res.codigo !== res.codigo_original
+            && res.colmena === posicionNueva || false; // reemplazo abriendo tubo nuevo
+        // Detectar reemplazo de tubo nuevo: fuente reemplazo + colmena nueva (Axx) sin serial previo
+        const _esTuboNuevoReemplazo = res.fuente === 'reemplazo'
+            && res.codigo_original && res.codigo_original !== res.codigo;
+        const _esTuboNuevo = res.fuente === 'tubo_nuevo';
+        const _comp = (ord.componente && ord.componente !== 'TUBO') ? ord.componente : '';
+
+        if (_esTuboNuevoReemplazo) {
+            // Tubo nuevo abierto como reemplazo de código descontinuado (ej: E53 → E66)
+            accionCortar = `TUBO NUEVO (REEMPLAZO ${res.codigo_original} \u2192 ${res.codigo})`;
+        } else if (_esTuboNuevo) {
+            accionCortar = _comp ? `${_comp} NUEVO` : 'TUBO NUEVO';
+        } else if (_comp) {
+            accionCortar = `CORTAR ${_comp}`;
         } else {
             accionCortar = 'CORTAR';
         }
+
+        // Colmena: para tubos nuevos mostrar nombreMaterialNuevo, para reemplazos la colmena asignada
+        const _colmenaExcel = (_esTuboNuevo || _esTuboNuevoReemplazo)
+            ? (res.nombreMaterialNuevo || 'TUBO NUEVO')
+            : (res.colmena || '-');
 
         // Fila CORTAR
         datosExcel.push([
             ord.ot || '-',
             ord.ubic || '-',
             accionCortar,
-            res.fuente === 'tubo_nuevo' ? (res.nombreMaterialNuevo || 'TUBO NUEVO') : (res.colmena || '-'),
+            _colmenaExcel,
             codigoExcel,
             color,
             res.medida_cm,
@@ -3144,7 +3150,6 @@ async function exportarResultados() {
         const fila = datosExcel[f];
         const accion = String(fila[2] || '').toUpperCase();
         const codigo = fila[4];
-
         if (accion.includes('CORTAR')) {
             const origen = Number(fila[7]);
             if (!isNaN(origen) && origen > 0) {
