@@ -7,7 +7,7 @@ function limpiarNumero(valor) {
     return isNaN(num) ? 0 : num;
 }
 
-const VERSION_ACTUAL = "3.8";
+const VERSION_ACTUAL = "3.9";
 
 const MM_TUBO_ORIGINAL = 5780;
 const MM_KERF = 3;
@@ -3067,18 +3067,14 @@ async function exportarResultados() {
         const color = res.color || obtenerColorDeCatalogo(codigoReal);
 
         // Acción descriptiva según fuente y componente
-        let accionCortar;
-        const _esReemplazoDescontinuado = (res.fuente === 'reemplazo' || res.fuente === 'tubo_nuevo')
-            && res.codigo_original && res.codigo && res.codigo !== res.codigo_original
-            && res.colmena === posicionNueva || false; // reemplazo abriendo tubo nuevo
-        // Detectar reemplazo de tubo nuevo: fuente reemplazo + colmena nueva (Axx) sin serial previo
-        const _esTuboNuevoReemplazo = res.fuente === 'reemplazo'
-            && res.codigo_original && res.codigo_original !== res.codigo;
-        const _esTuboNuevo = res.fuente === 'tubo_nuevo';
         const _comp = (ord.componente && ord.componente !== 'TUBO') ? ord.componente : '';
-
+        // Reemplazo de código descontinuado abriendo tubo nuevo (fuente='reemplazo' + colmena nueva)
+        const _esTuboNuevoReemplazo = res.fuente === 'reemplazo'
+            && res.codigo_original && res.codigo && res.codigo !== res.codigo_original
+            && res.codigo_reemplazo;
+        const _esTuboNuevo = res.fuente === 'tubo_nuevo';
+        let accionCortar;
         if (_esTuboNuevoReemplazo) {
-            // Tubo nuevo abierto como reemplazo de código descontinuado (ej: E53 → E66)
             accionCortar = `TUBO NUEVO (REEMPLAZO ${res.codigo_original} \u2192 ${res.codigo})`;
         } else if (_esTuboNuevo) {
             accionCortar = _comp ? `${_comp} NUEVO` : 'TUBO NUEVO';
@@ -3087,8 +3083,6 @@ async function exportarResultados() {
         } else {
             accionCortar = 'CORTAR';
         }
-
-        // Colmena: para tubos nuevos mostrar nombreMaterialNuevo, para reemplazos la colmena asignada
         const _colmenaExcel = (_esTuboNuevo || _esTuboNuevoReemplazo)
             ? (res.nombreMaterialNuevo || 'TUBO NUEVO')
             : (res.colmena || '-');
